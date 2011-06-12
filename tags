@@ -1,0 +1,121 @@
+($empty,$current	keytab-lilo.pl	35
+($pfx,$map	keytab-lilo.pl	34
+(@maps	keytab-lilo.pl	67
+(@tmp	keytab-lilo.pl	68
+A	checkit	66
+ADIR	QuickInst	27
+B	checkit	94
+BDIR	QuickInst	32
+CONFIG	make.vars	72
+DASH	mkrescue	137
+DDIR	QuickInst	39
+DDIR	QuickInst	44
+DESTDIR	QuickInst	64
+DEVMAPPER	make.vars	104
+DHAS_LIBDEVMAPPER_H	make.vars	103
+DHAS_VERSION_H	make.vars	102
+ERROR	checkit	60
+ERROR	checkit	74
+ERROR	checkit	88
+ERROR	checkit	102
+FF	CHANGELOG_old	/^      (6 bytes); now enough space for VE call; no /
+HDM	make.vars	103
+L	checkit	80
+LILO	NEWS	1
+LILO	make.vars	101
+LOader	COPYING	/^LInux LOader (LILO) program code, documentation, a/
+MINOR	mkrescue	144
+MINOR	mkrescue	151
+OKAY	checkit	60
+OKAY	checkit	74
+OKAY	checkit	88
+OKAY	checkit	102
+REVISION	mkrescue	148
+TMP	make.vars	106
+V	checkit	52
+addresses	CHANGELOG_old	/^    - Move two disk addresses (dflcmd, message\/bit/
+all	Makefile	/^all: test$/
+alles	Makefile	/^alles: test$/
+append	mkrescue	322
+append	mkrescue	324
+append	mkrescue	327
+at	CHANGELOG_old	207
+bios	mkrescue	456
+bs	mkrescue	452
+clean	Makefile	/^clean: tidy$/
+compact	mkrescue	96
+debug	mkrescue	27
+defines	make.vars	99
+device	mkrescue	344
+diag	mkrescue	362
+diag	mkrescue	374
+diagnostic	Makefile	/^diagnostic: test$/
+disk	mkrescue	497
+distclean	Makefile	/^distclean: clean$/
+docs	Makefile	/^docs:$/
+dosexe	Makefile	/^dosexe: test$/
+elif	mkrescue	316
+elif	mkrescue	324
+elif	mkrescue	332
+exit	mkrescue	315
+exit	mkrescue	323
+exit	mkrescue	331
+fast	mkrescue	337
+floppy	Makefile	/^floppy: test$/
+floppy2	checkit	98
+fn	CHANGELOG_old	457
+h	CHANGELOG_old	58
+h	CHANGELOG_old	455
+h	CHANGELOG_old	457
+help	Makefile	/^help:$/
+img	checkit	98
+initrd	mkrescue	314
+initrd	mkrescue	316
+initrd	mkrescue	319
+ins	Makefile	/^ins:$/
+install	Makefile	/^install:  all$/
+install	mkrescue	372
+it	Makefile	/^it:	docs alles diagnostic dosexe$/
+keymap	mkrescue	330
+keymap	mkrescue	332
+lilo	mkrescue	83
+lilo	mkrescue	402
+loopback	mkrescue	490
+main::build_table	keytab-lilo.pl	/^sub build_table$/
+main::load_map	keytab-lilo.pl	/^sub load_map$/
+main::usage	keytab-lilo.pl	/^sub usage$/
+map	CHANGELOG_old	/^      merges its own drive map	(chain.S)$/
+max	CHANGELOG_old	318
+mount	mkrescue	104
+mountconfig	mkrescue	392
+of	mkrescue	506
+option	CHANGELOG_old	197
+overrides	CHANGELOG_old	378
+partition	CHANGELOG_old	199
+partitions	CHANGELOG_old	/^      partitions (in addition to primary partition/
+ret	checkit	15
+ret	checkit	56
+ret	checkit	60
+ret	checkit	70
+ret	checkit	74
+ret	checkit	84
+ret	checkit	88
+root	mkrescue	301
+root	mkrescue	306
+root	mkrescue	309
+rw	mkrescue	489
+sectors	mkrescue	355
+sectors	mkrescue	357
+sectors	mkrescue	359
+sectors	mkrescue	365
+sectors	mkrescue	381
+size	mkrescue	339
+size	mkrescue	341
+size	mkrescue	351
+skip	mkrescue	167
+spotless	Makefile	/^spotless: distclean$/
+test	Makefile	/^test: test.img$/
+test.img	Makefile	/^test.img:$/
+tidy	Makefile	/^tidy:$/
+totalsize	mkrescue	437
+uninstall	Makefile	/^uninstall:$/
