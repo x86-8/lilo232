@@ -132,49 +132,49 @@ start:
 /***************************************************/
 
 	mov	ss,ax
-	mov	sp,#SETUP_STACKSIZE	! set the stack for First Stage
-	sti			! now it is safe
+	mov	sp,#SETUP_STACKSIZE	! set the stack for First Stage / 스택주소 = 0x07c0:800(2048) = 0x8400 부터 아래로 쌓인다
+	sti			! now it is safe	/ 점프와 스택설정까지 인터럽트 금지
 
-	push	dx		! set ext_dl (and ext_dh, which is not used)
+	push	dx		! set ext_dl (and ext_dh, which is not used) / first.S가 mbr이면 dl = drive number
 	push	bx		! WATCH the order of pushes
 	push	es		! set ext_es
 	push	si		! set ext_si
 
-#ifdef DEBUG_NEW
+#ifdef DEBUG_NEW	/* 안들어감 */
 	push	ds
 	push	es	! just not enough space with debug turned on
 #endif
 
 #define JRC_DS_EQ_SS
-
-	cld			! do not forget to do this !!!
-	mov	ds,ax		! address data area
-	xor	bp,bp		! shorted addressing
+	cld			! do not forget to do this !!!  스트링 명령을 위한 df 초기화
+	mov	ds,ax		! address data area = 0x7c0
+	xor	bp,bp		! shorted addressing , bp = 0
 
 #if VIDEO_ENABLE
 ! a BIOS has been found where the video interrupt (0x10) trashes DX
 !   so, we had better be very paranoid about DX
-!
+! 그래픽 모드를 3 (80x25 16color)으로 세팅한다. (int 0x10 ah=0, al=3)
+
 # if VIDEO_ENABLE==2
 	pusha			! protect DX
 # endif
 # if VIDEO_ENABLE > 2
-	mov	ax,#VIDEO_ENABLE	! set video mode 3 or 7
-# elif VIDEO_ENABLE==1
+	mov	ax,#VIDEO_ENABLE	!	VIDEO_ENABLE = 3
+# elif VIDEO_ENABLE==1		/* 1	-	use get vid mode/set vid mode to enable */
 	mov	ah,#15		! get video mode
-	int	0x10
-	cbw
-# else  /* VIDEO_ENABLE==2 */
-	mov	ax,#0x1200	! enable video (VGA)
+	int	0x10		! AH = number of columns / AL = mode / BH = display page
+	cbw				! 부호 확장 ax = al 
+# else  /* VIDEO_ENABLE==2 */	! = 2		use VGA enable call to enable video
+	mov	ax,#0x1200	! enable video (VGA) / video refresh - AL= 0 - enable refresh
 	mov	bl,#0x36	! (probably a nop on EGA or MDA)
 # endif
-	int	0x10		! video call
+	int	0x10		! video call / 기본은 ah=0 (set video mode) al=3 (80x25 16color)
 # if VIDEO_ENABLE==2
 	popa			! restore DX
 # endif
 #endif
 
-#if (VIDEO_ENABLE&1) == 0
+#if (VIDEO_ENABLE&1) == 0	/* 그래픽모드 최하위비트가 0일때 줄넘김 */
 	mov	al,#0x0d	! gimme a CR ...
 	call	display
 ; the suspect call for trashing DX on one BIOS:
@@ -184,41 +184,41 @@ start:
 
 #if defined(DEBUG_NEW)
 	mov	ah,dl
-	call	bout		! code in AH
+	call	bout		! code in AH / 디버그시 4비트씩 출력
 #endif
 	mov	al,#0x4c	! ... an 'L' ...
-	call	display
+	call	display ! 화면에 L을 출력
 
 lagain:
 	pusha			! preserve all the registers for restart
 
-	push	ds
-	pop	es		! use buffer at end of boot sector
+	push	ds	! 0x7c0
+	pop	es		! use buffer at end of boot sector / es = ds
 
-	cmp	dl,#EX_DL_MAG	! possible boot command line (chain.S)
-	jne	boot_in_dl
+	cmp	dl,#EX_DL_MAG	! possible boot command line (chain.S) / 0xfe
+	jne	boot_in_dl	! dl(drive number)이 magic number(0xfe)와 같은지 확인한다. 일반적으로 쓰이지 않음
 	mov	dl,dh		! code passed in DH instead
 boot_in_dl:
 
-	mov	bx,#map2	! buffer for volume search
-	mov	dh,[d_dev](bp)  ! map device to DH
+	mov	bx,#map2	! buffer for volume search / mbr의 끝주소 map2=512
+	mov	dh,[d_dev](bp)  ! map device to DH / ss=0x7c0, bp=0 [ss:bp+d_dev]=0x80
 
-#if VALIDATE
-	mov	ax,dx		! copy device code to AL
-	and	ah,#0x80	! AH = 00 or 80
+#if VALIDATE /* 플로피인지 하드인지 체크 / 부팅딘 하드 제한개수(16 or 2)를 넘어가면 분기 */
+	mov	ax,dx		! copy device code to AL 
+	and	ah,#0x80	! AH = 0x80 / AL=drive number
 	xor	al,ah		! hi-bits must be the same
 	js	use_installed
-	cmp	al,#MAX_BIOS_DEVICES	! limit the device code
+	cmp	al,#MAX_BIOS_DEVICES	! limit the device code = 16
 	jae	use_installed	! jump if DL is not valid
 #endif
 
 ! map is on boot device for RAID1, and if so marked; viz.,
-
-	test	byte ptr [prompt](bp),#FLAG_MAP_ON_BOOT
+!	7번째 비트가 꺼져있으면 use_boot로 분기
+	test	byte ptr [prompt](bp),#FLAG_MAP_ON_BOOT ! =64(40)=01000000
 	jnz	use_boot	! as passed in from BIOS or MBR loader
 
 use_installed:
-	mov	dl,dh		! device code to DL
+	mov	dl,dh		! device code to DL / 0x80
 	mov	esi,[map_serial_no](bp)	! to search for
 	or	esi,esi
 	jz	done_search
@@ -226,8 +226,8 @@ use_installed:
 	push	dx		! save flags
 
 	mov	ah,#8		! get number of hard disks
-	mov	dl,#0x80
-	push	bx		! paranoia
+	mov	dl,#0x80	! drive number 0,1..=floopy 0x80,0x81..=hard drive
+	push	bx		! paranoia / bx에 drive type이 retune됨.
 	int	0x13
 	pop	bx
 	jc	error
@@ -248,7 +248,7 @@ vagain:
 #endif
 	call	disk_read	! read 
 
-	cmp	esi,[PART_TABLE_OFFSET-6](bx)
+	cmp	esi,[PART_TABLE_OFFSET-6](bx) ! 446 바이트 (MBR 데이터영역)
 	je	vol_found
 	loop	vagain
 
@@ -320,7 +320,7 @@ disk_error2:
 	mov	ah,#0x40	; signal seek error
 
 ! no return from error
-error:
+error:	! 에러가 뜨면 스택을 줄이고 다시 시도 (lagain)
 
 #ifndef LCF_NO1STDIAG
         mov	al,#32          ! display a space
@@ -365,11 +365,11 @@ disk_read:
 	pop	ds
 #endif
 
-	push	bp		! BP==0
+	push	bp		! BP==0  ! 확장된 디스크 읽기를 위해 패킷을 스택을 통해 si로 넘겨준다
 	push	bp		! BP==0
 
 	push	eax		! low order disk address
-#ifdef DEBUG_LARGE
+#ifdef DEBUG_LARGE	/* 디버그가 켜져있으면 d_flag와 하드디스크 넘버가 출력된다 */
 	xchg	ax,dx
 	call	wout
 	xchg	ax,dx
@@ -383,10 +383,10 @@ disk_read:
 
 	push	bx
 
-	test	dh,#LINEAR_FLAG|LBA32_FLAG
-	jz	disk_geometric
-	
-	test	dh,#LBA32_FLAG
+	test	dh,#LINEAR_FLAG|LBA32_FLAG	! d_flag에서 LINEAR나 LBA가 켜져있는지 확인한다.
+	jz	disk_geometric ! 둘다 꺼져있으면 전통적인 CHS방식으로 점프 (ax=0x201)
+	! Linear만 켜져있으면 CHS방식으로 돌아간다
+	test	dh,#LBA32_FLAG	! 둘중 하나 혹은 둘다 켜져있는데 LBA가 꺼져있다면 LINEAR다
 	jz	disk_convert	; it must be LINEAR
 
 	mov	bx,#0x55AA	;magic number
@@ -402,31 +402,31 @@ disk_convert:
 	push	dx
 	push	es		! protect on floppies
 	mov	ah,#8		! get geometry
-	int	0x13
+	int	0x13		! 디스크 정보를 얻어온다.
 	pop	es
 disk_error3:			! transfer through on CF=1
 	jc	error		! disk_error12
 
-#if !CYL1023
-	push	cx
+#if !CYL1023 
+	push	cx		! cl 상위 2비트 & ch 8비트 = cylinder 
 	shr	cl,#6		;;;;
-	xchg	cl,ch	   ;CX is max cylinder number
+	xchg	cl,ch	   ;CX is max cylinder number / 온전한 10bit cylinder
 	mov	di,cx	   ;DI saves it
-	pop	cx
-#endif
-	shr	dx,#8
+	pop	cx 
+#endif 
+	shr	dx,#8		! dl = dh의 헤더 개수를 shift 
 	xchg	ax,dx		;AX <- DX
 	inc	ax		;AX is number of heads (256 allowed)
-
+	! di는 실린더, ax는 헤더+1
 ; compensate for Davide BIOS bug
 	dec	cx		; 1..63 -> 0..62;  0->63
-	and	cx,#0x003f	;CX is number of sectors
+	and	cx,#0x003f	;CX is number of sectors = 63 / 섹터만 남긴다
 	inc	cx		; allow Sectors==0 to mean 64
 
-	mul	cx		; kills DX also
+	mul	cx		; kills DX also / 섹터(cx) * 헤더(ax)
 	xchg	ax,bx	   	;save in BX
-
-	mov	ax,[edd_d_addr](si)	;low part of address
+				; second.S가 위치한 섹터 위치( [si+8], [si+10], eax)
+	mov	ax,[edd_d_addr](si)	;low part of address / logical block address
 	mov	dx,[edd_d_addr+2](si)	;hi part of address
 
 	cmp	dx,bx
@@ -456,10 +456,10 @@ disk_error3:			! transfer through on CF=1
 
 disk_edd:
 	mov	ah,#0x42
-disk_int13:
+disk_int13:		! int 13h를 두번 시도해본다
 	pop	bx
 
-	mov	bp,#5
+	mov	bp,#5	! bp를 카운터로 두번 시도후 실패시 disk_error3으로 간다.
 disk_retry:
 	pusha
 	int	0x13
@@ -479,7 +479,7 @@ disk_retry:
 	jmp	disk_retry
 
 
-disk_geometric:
+disk_geometric:		! CHS방식으로 1섹터를 읽어온다.
 	push	eax
 	pop	cx
 	pop	ax
@@ -490,7 +490,7 @@ disk_read2:
 	jmp	disk_int13
 
 
-disk_okay:
+disk_okay:	! 디스크 읽기가 성공적이면 스택을 복원
 ; the pusha block is implicitly removed below
 ;;;	mov	(si+2*16-1),ah	! set error code
 ;   the error code is never checked
@@ -509,7 +509,7 @@ pread:
 	lodsd			! get address
 	or	eax,eax
 	jz	done
-	add	eax,[raid](bp)	! reloc is 0 on non-raid
+	add	eax,[raid](bp)	! reloc is 0 on non-raid  레이드면 eax(second stage sector address)에 더한다.
 	call	disk_read	
 
 	add	bh,#SECTOR_SIZE/256    	! next sector
@@ -520,13 +520,14 @@ done:
 
 
 #if !defined(LCF_NO1STDIAG) || defined(DEBUG_NEW)
+! ah를 4비트씩 2번 출력 + ASCII 변환후 3A-3F를 빼고 변환한다.
 bout:	rol     ax,#4		! bring hi-nibble to position
 	call	nout
 	rol     ax,#4		! bring lo-nibble to position
 nout:	and	al,#0x0F	! display one nibble
 	daa			! shorter conversion routine
-	add	al,#0xF0
-	adc	al,#0x40	! is now a hex char 0..9A..F
+	add	al,#0xF0  
+	adc	al,#0x40	! is now a hex char 0..9A..F / ASCII 0-9, A-F만 출력된다.
 #endif
 ; display - write byte in AL to console
 ;	preserves all register contents
@@ -535,10 +536,10 @@ display0:
 #ifndef LCF_NOVGA
 display:
 #endif
-	pusha		! make sure no register is changed
+	pusha		! make sure no register is changed / 레지스터들을 저장
 	mov	bx,#7		!  BH=0, BL=07
-	mov	ah,#14
-	int	0x10
+	mov	ah,#14	! AL의 한글자를 출력
+	int	0x10	
 	popa		! restore all the registers
 #ifdef LCF_NOVGA
 display:
@@ -547,6 +548,7 @@ display:
 
 #ifdef DEBUG_LARGE
 
+! eax 더블워드를 출력
 dout:	pushad
 	ror	eax,#16
 	call	wout
@@ -557,6 +559,7 @@ dout:	pushad
 	popad
 	ret
 
+! ax레지스터를 화면에 출력
 wout:	push	ax
 	call	bout	! put out AH
 	pop	ax
