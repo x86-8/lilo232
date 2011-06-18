@@ -186,7 +186,7 @@ start:
 
  cld ! do not forget to do this !!! 스트링 명령을 위한 df 초기화
  mov ds,ax ! address data area = 0x7c0
- xor bp,bp ! shorted addressing , bp = 0 / bp 메모리 주소를 참조 하면 1-2바이트를 줄일수 있다.
+ xor bp,bp ! shorted addressing , bp = 0 / 메모리를 읽을때 bp를 참조 하면 1-2바이트를 줄일수 있다. 아래 샘플 참조
 !    88 25 64 00 00 00       mov    BYTE PTR ds:0x64,ah
 !    67 88 66 64             mov    BYTE PTR [bp+0x64],ah
 ! a BIOS has been found where the video interrupt (0x10) trashes DX
@@ -196,7 +196,7 @@ start:
 
  pusha ! protect DX
 # 168 "first.S"
- mov ax,#0x1200 ! enable video (VGA) / video refresh - AL= 0 - enable refresh
+ mov ax,#0x1200 ! enable video (VGA) / video refresh - AL이 0이면 enable refresh
  mov bl,#0x36 ! (probably a nop on EGA or MDA)
 
  int 0x10 ! video call / 기본은 ah=0 (set video mode) al=3 (80x25 16color)
@@ -206,7 +206,7 @@ start:
 
 
 
- mov al,#0x0d ! gimme a CR ...
+ mov al,#0x0d ! gimme a CR ... / CR, LF를 출력해 아랫줄 처음으로 간다.
  call display
 ; the suspect call for trashing DX on one BIOS:
  mov al,#0x0a ! ... an LF ...
@@ -218,7 +218,7 @@ start:
 
 
  mov al,#0x4c ! ... an 'L' ...
- call display ! 화면에 L을 출력
+ call display ! LILO 문자열중 화면에 L을 출력
 
 lagain: ; load again??? 
  pusha ! preserve all the registers for restart
@@ -227,7 +227,7 @@ lagain: ; load again???
  pop es ! use buffer at end of boot sector / es = ds
 
  cmp dl,#0xfe ! possible boot command line (chain.S) / 0xfe
- jne boot_in_dl ! dl(drive number)이 magic number(0xfe)와 같은지 확인한다. 일반적으로 쓰이지 않음
+ jne boot_in_dl ! dl(drive number)이 0xfe(magic number)인지 확인한다. external parameter는 일반적으로 쓰이지 않는다. 쓰인다면 넘겨주는 dh값을 dl으로 값으로 넘긴다. (drive 번호로 추정)
  mov dl,dh ! code passed in DH instead
 boot_in_dl: ; 부팅된 하드디스크(dl)를 체크
 
@@ -271,8 +271,8 @@ use_installed:
 
 
 
-vagain: ; volume again? 부팅된 디스크가 하드가 아니거나 16번째이상 혹은 prompt 관련 문제(RAID1)가 있을시 첫번째 하드디스크부터 순차적으로 volume을 찾는다. 찾으면 use_boot로 넘어간다.
- inc dx
+vagain: ; volume again? 부팅된 디스크가 하드가 아니거나 16번째이상이고 prompt 관련 비트가(RAID1) 0이면 첫번째 하드디스크부터 순차적으로 volume을 찾는다. 찾으면 use_boot로 넘어간다.
+ inc dx	! 처음에는 0x80 (첫번째 하드)
  xor eax,eax
 
  inc ax ! geometric addressing
@@ -280,7 +280,7 @@ vagain: ; volume again? 부팅된 디스크가 하드가 아니거나 16번째�
  call disk_read ! read
 
  cmp esi,[0x1be -6](bx) ! 446-6 바이트 (MBR 데이터영역) 0x440=disk signature / esi=map_serial_no
- je vol_found
+ je vol_found	! 볼륨을 찾았다면 use_boot로 점프 아니면 cx=0x80만큼 반복
  loop vagain
 
  pop dx ! restore specified BIOS code
@@ -313,7 +313,7 @@ use_boot:
 
  xor bx,bx
 
-sload:	! second stage load
+sload:	! second stage load?
  call pread ! read using map at DS:SI | 0x7c0:200에서 4바이트 섹터 주소를 읽어서
  jnz sload ! into memory at ES:BX (auto increment) / 0x880:0 주소공간에 넣는다.
 
@@ -324,13 +324,13 @@ sload:	! second stage load
  mov cx,#length ! number of bytes to compare
  mov ah,#0x9A ! possible error code | first와 second LILO 문자열, version, map stamp가 같지않으면 에러 출력
  repe
-   cmpsb ! check Signature 1 & 2
+   cmpsb ! check Signature 1 & 2 / 10바이트만큼 체크 도중에 틀리면 중단 -> error
  jne error ! check Signature 2
 
 
 
  mov al,#2 ! do not touch AH (error code)
- scasb		! second.s의 stage: 값과 비교
+ scasb		! second.s의 stage: 값과 한바이트 비교. x86 자료형은 컴파일될때 뒤집혀 저장된다.
  jne error
 
 
@@ -376,7 +376,7 @@ error: ! 에러가 뜨면 스택을 줄이고 다시 시도 (lagain)
 
 zzz:
 
- hlt
+ hlt	! 인터럽트가 걸릴때까지 대기
 
  jmp zzz ! spin; wait for Ctrl-Alt-Del
 
