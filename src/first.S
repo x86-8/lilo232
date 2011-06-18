@@ -13,7 +13,7 @@ source directory.
 get common.s		/* as86 "include" will bypass the CPP */
 
 #define DEBUG 0
-;asdfasdfasdf
+
 #if VERSION_MINOR>=50
 # define DEBUG_NEW
 
