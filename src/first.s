@@ -170,10 +170,10 @@ start:
 
 
  mov ss,ax
- mov sp,#SETUP_STACKSIZE ! set the stack for First Stage / 스택주소 = 0x07c0:800(2048) = 0x8400 부터 아래로 쌓인다
- sti ! now it is safe / 점프와 스택설정까지 인터럽트 금지
+ mov sp,#SETUP_STACKSIZE ! set the stack for First Stage ! 스택주소 = 0x07c0:800(2048) = 0x8400 부터 아래로 쌓인다
+ sti ! now it is safe ! 점프와 스택설정까지 인터럽트 금지
 
- push dx ! set ext_dl (and ext_dh, which is not used) / first.S가 mbr이면 dl = drive number
+ push dx ! set ext_dl (and ext_dh, which is not used) ! first.S가 mbr이면 dl = drive number
  push bx ! WATCH the order of pushes
  push es ! set ext_es
  push si ! set ext_si
@@ -186,7 +186,7 @@ start:
 
  cld ! do not forget to do this !!! 스트링 명령을 위한 df 초기화
  mov ds,ax ! address data area = 0x7c0
- xor bp,bp ! shorted addressing , bp = 0 / 메모리를 읽을때 bp를 참조 하면 1-2바이트를 줄일수 있다. 아래 샘플 참조
+ xor bp,bp ! shorted addressing , bp = 0 ! 메모리를 읽을때 bp를 참조 하면 1-2바이트를 줄일수 있다. 아래 샘플 참조
 !    88 25 64 00 00 00       mov    BYTE PTR ds:0x64,ah
 !    67 88 66 64             mov    BYTE PTR [bp+0x64],ah
 ! a BIOS has been found where the video interrupt (0x10) trashes DX
@@ -196,17 +196,17 @@ start:
 
  pusha ! protect DX
 # 168 "first.S"
- mov ax,#0x1200 ! enable video (VGA) / video refresh - AL이 0이면 enable refresh
+ mov ax,#0x1200 ! enable video (VGA) ! video refresh - AL이 0이면 enable refresh
  mov bl,#0x36 ! (probably a nop on EGA or MDA)
 
- int 0x10 ! video call / 기본은 ah=0 (set video mode) al=3 (80x25 16color)
+ int 0x10 ! video call ! 기본은 ah=0 (set video mode) al=3 (80x25 16color)
 
  popa ! restore DX
 
 
 
 
- mov al,#0x0d ! gimme a CR ... / CR, LF를 출력해 아랫줄 처음으로 간다.
+ mov al,#0x0d ! gimme a CR ... ! CR, LF를 출력해 아랫줄 처음으로 간다.
  call display
 ; the suspect call for trashing DX on one BIOS:
  mov al,#0x0a ! ... an LF ...
@@ -219,86 +219,86 @@ start:
 
  mov al,#0x4c ! ... an 'L' ...
  call display ! LILO 문자열중 화면에 L을 출력
-
-lagain: ; load again??? 
+ ! load again?
+lagain:
  pusha ! preserve all the registers for restart
 
  push ds ! 0x7c0
- pop es ! use buffer at end of boot sector / es = ds
+ pop es ! use buffer at end of boot sector ! es = ds
 
- cmp dl,#0xfe ! possible boot command line (chain.S) / 0xfe
+ cmp dl,#0xfe ! possible boot command line (chain.S) ! 0xfe
  jne boot_in_dl ! dl(drive number)이 0xfe(magic number)인지 확인한다. external parameter는 일반적으로 쓰이지 않는다. 쓰인다면 넘겨주는 dh값을 dl으로 값으로 넘긴다. (drive 번호로 추정)
  mov dl,dh ! code passed in DH instead
 boot_in_dl: ; 부팅된 하드디스크(dl)를 체크
 
- mov bx,#map2 ! buffer for volume search / mbr의 끝주소 map2=512
- mov dh,[d_dev](bp) ! map device to DH / ss=0x7c0, bp=0 [ss:bp+d_dev]=0x80
+ mov bx,#map2 ! buffer for volume search ! 인덱스섹터를 읽어들일곳은 mbr뒤(512)
+ mov dh,[d_dev](bp) ! map device to DH ! ss=0x7c0, bp=0 [ss:bp+d_dev]=0x80
 
-	! 플로피인지 하드인지 체크 / 부팅딘 하드 제한개수(16 or 2)를 >    넘어가면 분기
+	! 플로피인지 하드인지 체크 ! 부팅딘 하드 제한개수(16 or 2)를 >    넘어가면 분기
  mov ax,dx ! copy device code to AL
- and ah,#0x80 ! AH = 0x80 / AL=drive number
+ and ah,#0x80 ! AH = 0x80 ! AL=drive number
  xor al,ah ! hi-bits must be the same
  js use_installed
  cmp al,#16 ! limit the device code = 16
  jae use_installed ! jump if DL is not valid
 
-
+! 별문제 없다면(부팅된 디스크가 하드고 하드갯수가 16개 이하) use_boot로 간다.
 ! map is on boot device for RAID1, and if so marked; viz.,
 ! 7번째 비트가 꺼져있으면 use_boot로 분기
- test byte ptr [prompt](bp),#64 ! =64(40)=01000000 FLAG_MAP_ON_BOOT
+ test byte ptr [prompt](bp),#64 ! =64(40)=01000000 FLAG_MAP_ON_BOOT 부팅된 하드에 맵파일이 있지 않다면 use_installed로 추측
  jnz use_boot ! as passed in from BIOS or MBR loader
-
+! use_installed : 설치된 파티션이 있는지 첫번째 하드부터 순차적 검색
 use_installed:
- mov dl,dh ! device code to DL / 0x80
- mov esi,[map_serial_no](bp) ! to search for
+ mov dl,dh ! device code to DL ! 0x80
+ mov esi,[map_serial_no](bp) ! to search for ! 설치된 하드의 disk_signature(0x440)
  or esi,esi
- jz done_search
+ jz done_search ! 저장된 disk signature가 없으면use_boot로 점프
 
  push dx ! save flags
 
  mov ah,#8 ! get number of hard disks
  mov dl,#0x80 ! drive number 0,1..=floopy 0x80,0x81..=hard drive
- push bx ! paranoia / bx에 drive type이 return됨.
+ push bx ! paranoia ! bx 값이 바뀌기 때문에 저장
  int 0x13
  pop bx
  jc error
 
- movzx cx,dl ! extend to word in CX
+ movzx cx,dl ! extend to word in CX ! 설치된 드라이브 개수
 
 
- mov dx,#0x80-1 ! device 80, flags=0
+ mov dx,#0x80-1 ! device 80, flags=0 
 
 
 
 
-vagain: ; volume again? 부팅된 디스크가 하드가 아니거나 16번째이상이고 prompt 관련 비트가(RAID1) 0이면 첫번째 하드디스크부터 순차적으로 volume을 찾는다. 찾으면 use_boot로 넘어간다.
- inc dx	! 처음에는 0x80 (첫번째 하드)
- xor eax,eax
+vagain: ; volume again? 설치된 하드 volume을 찾으면 use_boot로 점프한다.
+ inc dx	! 처음에는 0x80 (첫번째 하드) 못찾았다면 계속 증가 못찾았다면 계속 증가 못찾았다면 계속 증가 못찾았다면 계속 증가
+ xor eax,eax ! MBR. 저장되는 곳은0x7c0:200(es:bx) disk_read에서는 bx가 변경되지 않는다. (pread에서 변경)
 
  inc ax ! geometric addressing
 
- call disk_read ! read
+ call disk_read ! read ! MBR을 가져온다.
 
- cmp esi,[0x1be -6](bx) ! 446-6 바이트 (MBR 데이터영역) 0x440=disk signature / esi=map_serial_no
- je vol_found	! 볼륨을 찾았다면 use_boot로 점프 아니면 cx=0x80만큼 반복
+ cmp esi,[0x1be -6](bx) ! MBR의 446-6. 0x440=disk signature ! esi=[map_serial_no](설치된 하드)
+ je vol_found	! 볼륨을 찾았다면 use_boot로 점프 아니면 하드수 만큼 반복
  loop vagain
 
- pop dx ! restore specified BIOS code
+ pop dx ! restore specified BIOS code ! 찾지 못했다면 BIOS의 DL을 복구, DH=[d_dev]
     ! AX and DX are identical at this point
 
 vol_found:
   ! uses value in DX, stack may have extra value
-
+  ! DL 디스크의 second index sector를 읽어들인다.
 done_search:
 use_boot:
  push bx ! save map2 for later | es:bx 에 한섹터 index를 저장 0x7c0:200
 
- mov dh,[d_flag](bp) ! get device flags to DH / 설치할때 CHS방식인지 선형섹터주소로 저장하는걸로 추측한다.
+ mov dh,[d_flag](bp) ! get device flags to DH ! 0x60=EDD, 0x40=disk_convert, 0 = disk_geometry(CHS)
  mov si,#d_addr	! second stage index sector
  call pread ! increments BX +512(섹터값)
 
  mov ah,#0x99 ! possible error code
- cmp dword (bx-4),#0x4f4c494c ! "LILO" / second stage index 마지막 4바이트를 LILO 문자열과 비교
+ cmp dword (bx-4),#0x4f4c494c ! "LILO" ! second stage index 마지막 4바이트를 LILO 문자열과 비교
  jne error
 
  pop si ! point at #map2 | 512
@@ -312,10 +312,10 @@ use_boot:
 
 
  xor bx,bx
-
-sload:	! second stage load?
+! second stage load? index sector로 second.s를 읽어들인다.
+sload:
  call pread ! read using map at DS:SI | 0x7c0:200에서 4바이트 섹터 주소를 읽어서
- jnz sload ! into memory at ES:BX (auto increment) / 0x880:0 주소공간에 넣는다.
+ jnz sload ! into memory at ES:BX (auto increment) ! 0x880:0 주소공간에 넣는다.
 
 ! Verify second stage loader signature
 
@@ -324,7 +324,7 @@ sload:	! second stage load?
  mov cx,#length ! number of bytes to compare
  mov ah,#0x9A ! possible error code | first와 second LILO 문자열, version, map stamp가 같지않으면 에러 출력
  repe
-   cmpsb ! check Signature 1 & 2 / 10바이트만큼 체크 도중에 틀리면 중단 -> error
+   cmpsb ! check Signature 1 & 2 ! 10바이트만큼 체크 도중에 틀리면 중단 -> error
  jne error ! check Signature 2
 
 
@@ -337,12 +337,12 @@ sload:	! second stage load?
 ! Start the second stage loader DS=location of Params
 
  push es ! segment of second stage
- push bp ! BP==0 / 0x880:0  주소를 스택에 넣는다.
+ push bp ! BP==0 ! 0x880:0  주소를 스택에 넣는다.
 
  mov al,#0x49 ! display an 'I'
  call display
 
- retf ! Jump to ES:BP / I를 출력하고 Second Stage로 점프!!!
+ retf ! Jump to ES:BP ! I를 출력하고 Second Stage로 점프!!!
 
 
 
@@ -410,9 +410,9 @@ disk_read:
  push bx ! memory offset BX
  push #1 ! sector count
  push #16 ! size of packet = 16 bytes
- mov si,sp ! address of packet DS:SI
+ mov si,sp ! address of packet DS:SI ! 인자들을 si를 통해 읽는다.
 
- push bx
+ push bx ! disk_int13에서 복원 
 
  test dh,#0x40|0x20 ! d_flag에서 LINEAR나 LBA가 켜져있는지 확인한다.
  jz disk_geometric ! 둘다 꺼져있으면 전통적인 CHS방식으로 점프 (ax=0x201)
@@ -426,7 +426,7 @@ disk_read:
  jc disk_convert	! 에러나면 CHS변환
  cmp bx,#0xAA55 ;changed?
  jne disk_convert	! EDD가 동작하지 않으면 역시 CHS변환
- test cl,#01 ;EDD packet calls supported / bit0  extended disk access functions (AH=42h-44h,47h,48h) supported
+ test cl,#01 ;EDD packet calls supported ! bit0  extended disk access functions (AH=42h-44h,47h,48h) supported
  jnz disk_edd	! lba방식으로 점프
 
 disk_convert:
@@ -439,44 +439,44 @@ disk_error3: ! transfer through on CF=1
  jc error ! disk_error12
 
 
- push cx ! cl 상위 2비트 & ch 8비트 = cylinder
- shr cl,#6 ;;;;
- xchg cl,ch ;CX is max cylinder number / 온전한 10bit cylinder
- mov di,cx ;DI saves it
+ push cx 
+ shr cl,#6 ;;;; cl 2bits(high) + ch 8bits(low) = cylinder(0-1023)
+ xchg cl,ch ;CX is max cylinder number 
+ mov di,cx ;DI saves it 
  pop cx
 
- shr dx,#8 ! dl = dh의 헤더 개수를 shift
- xchg ax,dx ;AX <- DX
+ shr dx,#8 ! dx = Heads Per Cylinder (0-255)
+ xchg ax,dx ;AX = HPC
  inc ax ;AX is number of heads (256 allowed)
- ! di는 실린더, ax는 헤더+1
+ ! di=Cylinders, ax=HPC
 ; compensate for Davide BIOS bug
- dec cx ; 1..63 -> 0..62; 0->63
- and cx,#0x003f ;CX is number of sectors = 63 / 섹터만 남긴다
+ dec cx ; 1..63 -> 0..62; 0->63 ! and후 0=64로 만들기 위해 앞뒤에 +-1 추가
+ and cx,#0x003f ;CX is number of sectors = 63 ! sectors per track 만 남긴다
  inc cx ; allow Sectors==0 to mean 64
 
- mul cx ; kills DX also / 섹터(cx) * 헤더(ax)
- xchg ax,bx ;save in BX
+ mul cx ; kills DX also ! HPC * SPT 
+ xchg ax,bx ;save in BX ! bx에 저장(최대 256*64=16384)
     ; second.S가 위치한 섹터 위치( [si+8], [si+10], eax)
- mov ax,[edd_d_addr](si) ;low part of address / logical block address
+ mov ax,[edd_d_addr](si) ;low part of address ! DX,AX=LBA
  mov dx,[edd_d_addr+2](si) ;hi part of address
 
- cmp dx,bx	! bx = maximum head
+ cmp dx,bx	! bx = maximum head 나눗셈 결과가 ax를 초과하게된다.
  jae disk_error2 ;prevent division error
 
  div bx ;AX is cyl, DX is head/sect
-	! 몫이 AX, 나머지가 DX cyl*sect?
-	  
+	! AX=몫. AX=Cylinder= LBA/(HPC*SPT)
+	! DX=나머지. H*SPT + S - 1 
 
- cmp ax,di
+ cmp ax,di ; AX=cylinder DI=max cylinders
 
  ja disk_error2 ;cyl is too big
 ! 섹터변환
  shl ah,#6 ; save hi 2 bits
  xchg al,ah
- xchg ax,dx
- div cl ;AH = sec-1, AL = head
- or dl,ah ;form Cyl/Sec
- mov cx,dx
+ xchg ax,dx ; Cylinder는 Low8,High2로 DX에 보존. AX는 아까 계산한 나머지
+ div cl ;AH = sec-1, AL = head ! DX를 SPT(CX)로 나누면 몫은 Head 나머지는 Sector-1
+ or dl,ah ;form Cyl/Sec ! 디스크 읽기 포맷. CX=Cyliner(Low8,High2),Sector로 저장
+ mov cx,dx 
  inc cx ; sector is 1 based
 
  pop dx ! restore device code
@@ -543,7 +543,7 @@ pread:
  add eax,[raid](bp) ! reloc is 0 on non-raid 레이드면 eax(second stage sector address)에 더한다.
  call disk_read
 
- add bh,#512/256 ! next sector / 초기값은 map2 + 512 / 메모리 선형주소값. 코드 크기를 줄이기 위해 bh에 더한다.
+ add bh,#512/256 ! next sector ! 디스크를 읽어들일 메모리 주소. 코드 크기를 줄이기 위해 bh에 2를 더한다. = 0x200 = 512
 done:
  ret
 
@@ -558,7 +558,7 @@ bout: rol ax,#4 ! bring hi-nibble to position
 nout: and al,#0x0F ! display one nibble
  daa ! shorter conversion routine
  add al,#0xF0
- adc al,#0x40 ! is now a hex char 0..9A..F / ASCII 0-9, A-F만 출력된다.
+ adc al,#0x40 ! is now a hex char 0..9A..F ! ASCII 0-9, A-F만 출력된다.
 
 ; display - write byte in AL to console
 ; preserves all register contents
@@ -567,7 +567,7 @@ display0:
 
 display:
 
- pusha ! make sure no register is changed / 레지스터들을 저장
+ pusha ! make sure no register is changed ! 레지스터들을 저장
  mov bx,#7 ! BH=0, BL=07
  mov ah,#14 ! AL의 한글자를 출력
  int 0x10
