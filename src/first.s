@@ -186,9 +186,9 @@ start:
 
  cld ! do not forget to do this !!! 스트링 명령을 위한 df 초기화
  mov ds,ax ! address data area = 0x7c0
- xor bp,bp ! shorted addressing , bp = 0 ! 메모리를 읽을때 bp를 참조 하면 1-2바이트를 줄일수 있다. 아래 샘플 참조
-!    88 25 64 00 00 00       mov    BYTE PTR ds:0x64,ah
-!    67 88 66 64             mov    BYTE PTR [bp+0x64],ah
+ xor bp,bp ! shorted addressing , bp = 0 ! 가까운 곳의 메모리를 읽을때 간접주소 방식을 이용하면 직접 지정방식보다 코드 크기를 줄일수 있다. 직접지정방식도 ax레지스터를 사용하면 크기가 줄어든다. 아래 샘플 참조.
+!	890E5000          mov [0x50],cx
+!	894E50            mov [bp+0x50],cx
 ! a BIOS has been found where the video interrupt (0x10) trashes DX
 ! so, we had better be very paranoid about DX
 ! 그래픽 모드를 3 (80x25 16color)으로 세팅한다. (int 0x10 ah=0, al=3)
