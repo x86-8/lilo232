@@ -178,7 +178,7 @@ gdt: ; space for BIOS
 
 start: cld ; only CLD in the code; there is no STD
 
- push ds
+ push ds ; fs에 0x7c0을 넣어준다.
  pop fs ; address parameters from here
 
 
@@ -186,19 +186,19 @@ start: cld ; only CLD in the code; there is no STD
 
 
 
- seg cs
- mov [init_dx],dx ; save DX passed in from first.S
+ seg cs	; segment prefix = cs: = 2Eh
+ mov [init_dx],dx ; save DX passed in from first.S ; DX값 확인!
 
- int 0x12 ; get memory available
-
-
+ int 0x12 ; get memory available ; 사용가능한 메모리 공간(1k단위) 테스트 결과:640 내의 결과가 나온다.
 
 
- shl ax,#6 ; convert to paragraphs
- sub ax,#Dataend/16
+
+
+ shl ax,#6 ; convert to paragraphs ; 1k단위는 10비트 shift다. 여기서 6비트 왼쪽 시프트하면 세그먼트값이 들어간다 . = 바이트 크기 / 16
+ sub ax,#Dataend/16 ; (max_secondary + 5120?) 640k - 크기(10kb정도로 추정) 위치에 복사한다. 사용가능한 램의 끝부분에 위치시킨다.
  mov es,ax ; destination address
- push cs
- pop ds
+ push cs ; 0x880
+ pop ds  ; 0x880
  xor si,si
  xor di,di
  xor ax,ax
@@ -211,7 +211,7 @@ start: cld ; only CLD in the code; there is no STD
    stosw
  push es
  push #continue
- retf ; branch to continue address
+ retf ; branch to continue address ; 메모리 공간을 얻어 자가복제후 점프
 continue:
 # 231 "second.S"
  call serial_setup ; set up the COM port, if any
@@ -221,8 +221,8 @@ continue:
  mov cx,#32 ; drain type-ahead buffer ?
 drkbd: mov ah,#1 ; is a key pressed ?
  int 0x16
- jz comcom ; no -> done
- xor ah,ah ; get the key
+ jz comcom ; no -> done ; 키가 눌렸으면 comcom으로 점프
+ xor ah,ah ; get the key ; 아니면 키눌림을 기다린다.
  int 0x16
  loop drkbd
 
@@ -233,7 +233,7 @@ comcom:
  call display
  push #0 ; get pointer to disk parameter table in DS:SI
  pop ds
- lds si,[0x78] ; 0x78 = 4*0x1E
+ lds si,[0x78] ; 0x78 = 4*0x1E ; 인터럽트 0x1e 주소(Disk Initialization Parameter)를 ds:si에 가져온다.
 
  cmp byte ptr (si+4),#9 ; okay ?
  ja dskok ; yes -> do not patch
@@ -253,7 +253,7 @@ comcom:
  push #0
  pop ds
  cli ; paranoia
- mov [0x78],#dskprm
+ mov [0x78],#dskprm ; Disk init prarameter를 복사후에 0x1e 주소를 바꿔치기 한다.
  mov [0x7a],es
  sti
 dskok:
@@ -271,11 +271,11 @@ restrt: mov bx,cs ; adjust segment registers
  mov ds,bx
  mov es,bx
 
- sub bx,#63*0x20+0x20 ; segment for setup code &
+ sub bx,#63*0x20+0x20 ; segment for setup code & ; cs - 0x800
       ; bootsect
- mov cx,#INITSEG
- cmp bx,cx
- jbe restrt1
+ mov cx,#INITSEG ; 0x9000
+ cmp bx,cx ; 할당된 메모리공간 - 0x800
+ jbe restrt1 ; bx가 0x9000보다 작거나 같으면 그대로 쓰고 크면 bx에 0x9000을 넣는다.
  mov bx,cx ; BX is the smaller segment #
 restrt1:
  mov word ptr [map],#Map
@@ -1934,7 +1934,7 @@ shpress:stc ; set carry
 
 ! Timeout handling
 
-instto: push ds ; install the timeout handler
+instto: push ds ; install the timeout handler ; 타이머 인터럽트 (0x1c)를 tick 루틴으로 교체한다.
  push #0
  pop ds
 
@@ -1948,7 +1948,7 @@ instto: push ds ; install the timeout handler
  pop ds
  ret
 
-remto: push es ; remove the interrupt handler
+remto: push es ; remove the interrupt handler ; 원래의 타이머 인터럽트 루틴을 복원한다.
  push #0
  pop es
 
@@ -2555,7 +2555,7 @@ divisor:
 ; No registers are saved
 ;
 serial_setup:
-;;
+;; com port를 초기화
 ;; seg fs
  mov dx,par2_port ; use a COM port ?
    ; watch out, loads par2_ser_param
@@ -4819,16 +4819,16 @@ theends = the_end1/512
 max_secondary:
 # 4140 "second.S"
 Map = max_secondary + 512
-Dflcmd = Map + 512
+Dflcmd = Map + 512 
 Map2 = Dflcmd
 Keytable = Dflcmd + 512
-Descr = Keytable + 512
-ParmBSS = Descr + 512*MAX_DESCR_SECS_asm
+Descr = Keytable + 512 ; +4  sector
+ParmBSS = Descr + 512*MAX_DESCR_SECS_asm ; +7 sector
 
 
 
-BSSstart = ParmBSS
-Parmline = BSSstart + 512
+BSSstart = ParmBSS ; +7
+Parmline = BSSstart + 512 ; +8
 
 
 
@@ -4884,7 +4884,7 @@ BSSend = *
 BSSsize = BSSend-BSSstart
 
 
-Dataend = Parmline + 512
+Dataend = Parmline + 512 ; max_secondary + 5120 byte
 
  .org max_secondary
 
