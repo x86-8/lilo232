@@ -189,26 +189,26 @@ start: cld ; only CLD in the code; there is no STD
  seg cs	; segment prefix = cs: = 2Eh
  mov [init_dx],dx ; save DX passed in from first.S ; DX값 확인!
 
- int 0x12 ; get memory available ; 사용가능한 메모리 공간(1k단위) 테스트 결과:640 내의 결과가 나온다.
+ int 0x12 ; get memory available ; EBDA를 제외한 사용가능한 메모리 공간(1k단위) 테스트 결과:640 내의 결과가 나온다. EBDA의 크기가 클 수 있기 때문에 가변적인 계산을 한다.
 
 
 
 
- shl ax,#6 ; convert to paragraphs ; 1k단위는 10비트 shift다. 여기서 6비트 왼쪽 시프트하면 세그먼트값이 들어간다 . = 바이트 크기 / 16
- sub ax,#Dataend/16 ; (max_secondary + 5120?) 640k - 크기(10kb정도로 추정) 위치에 복사한다. 사용가능한 램의 끝부분에 위치시킨다.
+ shl ax,#6 ; convert to paragraphs ; 1k단위는 byte에 10비트 shift한것과 같다. 여기서 6비트 왼쪽 시프트하면 세그먼트값이 들어간다 . = 바이트 크기 / 16
+ sub ax,#Dataend/16 ; 640k - 크기(10kb정도로 추정) 위치에 복사한다. 사용가능한 램의 끝부분에 위치시킨다.
  mov es,ax ; destination address
  push cs ; 0x880
  pop ds  ; 0x880
  xor si,si
  xor di,di
  xor ax,ax
- mov cx,#max_secondary/2 ; count of words to move
+ mov cx,#max_secondary/2 ; count of words to move ; 코드영역 크기
  rep
-   movsw
- add di,#BSSstart-max_secondary
+   movsw	; 코드영역(시작-max_secondary) 복사
+ add di,#BSSstart-max_secondary	; 코드+BSS사이의 7섹터를 넘긴다.
  mov cx,#BSSsize/2
  rep
-   stosw
+   stosw	; BSS 초기화
  push es
  push #continue
  retf ; branch to continue address ; 메모리 공간을 얻어 자가복제후 점프
@@ -235,7 +235,7 @@ comcom:
  pop ds
  lds si,[0x78] ; 0x78 = 4*0x1E ; 인터럽트 0x1e 주소(Disk Initialization Parameter)를 ds:si에 가져온다.
 
- cmp byte ptr (si+4),#9 ; okay ?
+ cmp byte ptr (si+4),#9 ; okay ? 3.5인치가 18, 5.25인치가 9
  ja dskok ; yes -> do not patch
 
  push cs ; get pointer to new area in ES:DI
@@ -243,7 +243,7 @@ comcom:
  mov di,#dskprm
  mov cx,#6 ; copy 12 bytes
  rep
- movsw
+ movsw	; 0x1e 인터럽트의 sector per track이 9보다 작으면 12바이트의 디스켓 정보를 second stage의 [dskprm]으로 옮기고 si+4(옮긴후의 di-8)에 18을 넣는다. 
  seg es ; patch number of sectors
 
  mov byte ptr (di-8),#18
@@ -253,15 +253,15 @@ comcom:
  push #0
  pop ds
  cli ; paranoia
- mov [0x78],#dskprm ; Disk init prarameter를 복사후에 0x1e 주소를 바꿔치기 한다.
- mov [0x7a],es
+ mov [0x78],#dskprm ; Disk init prarameter를 복사후에 0x1e 주소를 바꾼다.
+ mov [0x7a],es		; 섹터크기가 9보다 작으면 바꿔치기 한다. (SPT가 9이하면 디스크가 이상한 상태?)
  sti
 dskok:
 
  seg cs ; clear the break flag
  mov byte ptr break,#0
 
- call instto ; get timer interrupt
+ call instto ; get timer interrupt ; 타이머 인터럽트 핸들러(0x1c)를 tick으로 바꾼다.
 
 ;;; jmp restrt ; get going
 
@@ -271,41 +271,41 @@ restrt: mov bx,cs ; adjust segment registers
  mov ds,bx
  mov es,bx
 
- sub bx,#63*0x20+0x20 ; segment for setup code & ; cs - 0x800
+ sub bx,#63*0x20+0x20 ; segment for setup code & MAX_SETUPSECS=커널에서 SETUP의 최대 크기(63); cs - 0x800 = 2048 (바이트 단위로 32k) 
       ; bootsect
  mov cx,#INITSEG ; 0x9000
  cmp bx,cx ; 할당된 메모리공간 - 0x800
- jbe restrt1 ; bx가 0x9000보다 작거나 같으면 그대로 쓰고 크면 bx에 0x9000을 넣는다.
- mov bx,cx ; BX is the smaller segment #
+ jbe restrt1 ; lilo크기+EBDA크기-32k가 0x9000보다 작으면 -32k, 크면 0x9000 
+ mov bx,cx ; BX is the smaller segment # 메모리가 608이상 여유가 있으면 initseg를 0x9000으로 하고 아니면 second 복사주소 -최대setup크기(32k)를 initseg로 한다. 
 restrt1:
- mov word ptr [map],#Map
- mov [initseg],bx ; set up INITSEG (was 0x9000)
+ mov word ptr [map],#Map = max_secondary + 512
+ mov [initseg],bx ; set up INITSEG (was 0x9000) ; bootsect가 위치할곳
  lea cx,(bx+0x20)
- mov [setupseg],cx ; set up SETUPSEG (was 0x9020)
+ mov [setupseg],cx ; set up SETUPSEG (was 0x9020) ; 커널의 setup이 위치할곳
  mov cx,cs
  sub cx,bx ; subtract [initseg]
- shl cx,#4 ; get stack size
- mov ss,bx ; must lock with move to SP below
+ shl cx,#4 ; get stack size	; initseg만큼 빼서 offset만 구한다. 세그먼트와 오프셋을 분리한다.
+ mov ss,bx ; must lock with move to SP below ; INITSEG (0x9000)
  mov sp,cx ; data on the stack)
 # 392 "second.S"
- cmp dword [sig],#0x4f4c494c ; "LILO"
+ cmp dword [sig],#0x4f4c494c ; "LILO" ; 제대로 복사됐는지 확인. (sig=="LILO")
  jne crshbrn2
  cmp dword [mcmdbeg+6],#0x4547414d ; "MAGE" from BOOT_IMAGE
  jne crshbrn2
  cmp BYTE [stage],#2
 
  jne crshbrn
- cmp WORD [version],#256*2 +23
-
+ cmp WORD [version],#256*2 +23	; 버전 확인
+! 문자열과 버전이 맞지 않으면 에러 출력후 종료
 crshbrn2: jne crshbrn
- mov [cmdbeg],#acmdbeg ; probably unattended boot
+ mov [cmdbeg],#acmdbeg ; probably unattended boot ; acmdbeg="auto "
 
- mov di,#devmap ; place to store the device map
+ mov di,#devmap ; place to store the device map ; BSSstart + 128
 
- mov ah,[init_dx] ; AH is physical device
+ mov ah,[init_dx] ; AH is physical device ; 저장한 dx(dl) 값 (드라이브값??)
 
- seg fs
- mov al,[par1_secondary+0+SSDIFF] ; map device logical
+ seg fs		; 0x07c0
+ mov al,[par1_secondary+0+SSDIFF] ; map device logical ; SSDIFF=0 d_dev,d_flag 여기서는 d_dev = 0x80
 
 
 
@@ -319,19 +319,19 @@ crshbrn2: jne crshbrn
 
 
 
-
+! 부팅된하드와 d_dev값이 다르면 [BSSstart+128]에 AX를 넣어주고 같으면 0을 넣어준다.
  stosw ; set up the translation from map -> boot
 end_tt:
  xor ax,ax
  stosw
 
 ldsc:
-
+! load descriptor
  seg fs
- mov eax,[par1_mapstamp]
+ mov eax,[par1_mapstamp]	; map file이 만들어진 시간
 
  cmp eax,[par2_mapstamp]
- jne timeerr
+ jne timeerr	; 타임스탬프가 다르면 에러 출력하고 hlt,무한루프
 
  call kt_read ; read the Keytable
 
@@ -1762,14 +1762,14 @@ nout: and al,#0x0F ; lower nible only
 ! part of the 'say' routine
 ! actual entry point is below at 'say:'
 
-say_loop:
+say_loop: 
  cmp al,#10 ; \n ?
  jne nonl ; no -> go on
- mov al,#13 ; display a CRLF
+ mov al,#13 ; display a CRLF ; LF면 CRLF를 찍어준다. LF=10 CR=13
  call display
  mov al,#10
 nonl:
- cmp al,#12 ; ^L ?
+ cmp al,#12 ; ^L ? ! 화면 지움
  jne nocls ; no -> go on
 
 
@@ -1782,7 +1782,7 @@ nonl:
  mov ah,#0xf ; clear the local screen
  int 0x10
  xor ah,ah
- int 0x10
+ int 0x10	; get video state, set video mode / 화면 상태를 얻어오는 함수와 설정을 얻어오는 인터럽트로 화면을 지운다.
  pop bx
 
 tosnext: jmp snext ; next character
@@ -1792,7 +1792,7 @@ snext:
 ! fall into say ; process next character
 
 ! Display a NUL-terminated string on the console
-
+! bx에 문자열의 포인터를 받아 특수문자들을 처리해주고 null(0)값이 나올때까지 출력한다.
 say: mov al,(bx) ; get byte
  or al,al ; NUL ?
  jnz say_loop ; not the end
@@ -1970,18 +1970,18 @@ setto: or ax,ax ; time out immediately ?
 toimmed:mov byte ptr timeout,#0xff ; set the timed-out flag
  ret ; done
 
-tick: pushf ; save flags
+tick: pushf ; save flags ; 대체되는 0x1c 타이머 인터럽트 루틴
  seg cs ; no timeout ?
- cmp word ptr cntdown,#0xffff
+ cmp word ptr cntdown,#0xffff	; 0xffff면 카운트되지 않는다.(틱감소 없음)
  je notzro ; yes -> go on
  seg cs ; decrement counter
  dec word ptr cntdown
  jnz notzro ; not zero -> go on
  seg cs ; set timeout flag
- mov byte ptr timeout,#0xff
+ mov byte ptr timeout,#0xff	; cntdown을 감소시켜서 0이되면 timeout에 0xff를 넣는다.
 notzro:
  seg cs
- push dword [int1c_l]
+ push dword [int1c_l]	; 원래 0x1c 루틴으로 점프
  iret ; continue with old interrupt
 
 kt_set:
@@ -2113,7 +2113,7 @@ cwr_flags: .byte 0 ; saved flags
 
 
 kt_read: ; Keytable read
- call kt_set ; set for Keytable i/o
+ call kt_set ; set for Keytable i/o ; al, bx, cx, dx에 값을 세팅
  call cread
  jc keyerr
  mov si,#Keytable ; compute a checksum of the keytable
@@ -2136,7 +2136,7 @@ nokeyerr:
 ! trashes CX and DI
 !
 cread: ; entry point for mapped device r/w
- call map_device ; DL (logical) -> DL (physical)
+ call map_device ; DL (logical) -> DL (physical) ???????
 
 cread_physical: ; same entry, device is not mapped
 
@@ -4804,31 +4804,31 @@ cmdline:.byte 0
 
 
 
- .org *+4
+ .org *+4	; 데이터 저장? 4byte 정렬 때문에?
 theend:
 
 lkwbuf = cmdline+CL_LENGTH+2 ; this is a word
 lkcbuf = lkwbuf+2
 theend2 = lkcbuf+CL_LENGTH ; lkcbuf is 256
 
-the_end1 = theend+511
-theends = the_end1/512
+the_end1 = theend+511	! theend + 1섹터 (bytes)
+theends = the_end1/512	! theends = theend의 섹터크기
  .org theends*512-4
  .long X
- .align 512
-max_secondary:
-# 4140 "second.S"
-Map = max_secondary + 512
-Dflcmd = Map + 512 
-Map2 = Dflcmd
-Keytable = Dflcmd + 512
-Descr = Keytable + 512 ; +4  sector
-ParmBSS = Descr + 512*MAX_DESCR_SECS_asm ; +7 sector
+ .align 512		! 섹터단위 정렬
+max_secondary:	
+# 4140 "second.S"	! max_seocndary = theend 다음 섹터
+Map = max_secondary + 512	! Map = max_secondary + 1 (sector)
+Dflcmd = Map + 512			! Dflcmd = max_secondary + 2
+Map2 = Dflcmd				! Map2 = max_secondary + 2
+Keytable = Dflcmd + 512 	! Keytable = max_secondary + 3
+Descr = Keytable + 512		! Descr = max_secondary + 4
+ParmBSS = Descr + 512*MAX_DESCR_SECS_asm ! ParmBSS = max_secondary + 7
 
 
 
-BSSstart = ParmBSS ; +7
-Parmline = BSSstart + 512 ; +8
+BSSstart = ParmBSS			! BSSstart = max_secondary + 7
+Parmline = BSSstart + 512	! Parmline = max_secondary + 8
 
 
 
@@ -4837,13 +4837,13 @@ Parmline = BSSstart + 512 ; +8
 !************************************
 ! BSS data:
 ! moved from volume.S
-
+! BSS크기 = 512 bytes
 
  .org BSSstart
 # 1 "volume.S" 1
 # 25 "volume.S"
 vtab = *
- .org *+MAX_BIOS_DEVICES_asm*4 ; volume IDs indexed by
+ .org *+MAX_BIOS_DEVICES_asm*4 ; volume IDs indexed by ; *+16*4
      ; REAL bios device code
 
 rtab = *
@@ -4881,10 +4881,10 @@ Wshs = *
 
  .align 512
 BSSend = *
-BSSsize = BSSend-BSSstart
+BSSsize = BSSend-BSSstart	! 1섹터
 
 
-Dataend = Parmline + 512 ; max_secondary + 5120 byte
+Dataend = Parmline + 512	! Dataend = max_secondary + 9 sector (4608 bytes)
 
  .org max_secondary
 

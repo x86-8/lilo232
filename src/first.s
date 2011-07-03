@@ -196,7 +196,7 @@ start:
 
  pusha ! protect DX
 # 168 "first.S"
- mov ax,#0x1200 ! enable video (VGA) ! video refresh - AL이 0이면 enable refresh
+ mov ax,#0x1200 ! enable video (VGA) ! video refresh - BL이 0x36, AL이 0이면 enable refresh
  mov bl,#0x36 ! (probably a nop on EGA or MDA)
 
  int 0x10 ! video call ! 기본은 ah=0 (set video mode) al=3 (80x25 16color)
@@ -304,7 +304,7 @@ use_boot:
  pop si ! point at #map2 | 512
 
 
- push #SETUP_STACKSIZE/16 + BOOTSEG + 512/16*2 ! 세그먼트로 계산 0x80 + 0x7c0 + 0x40 = 0x880
+ push #SETUP_STACKSIZE/16 + BOOTSEG + 512/16*2 ! 세그먼트로 계산 0x80 + 0x7c0 + 0x40 = 0x88
  pop es
 
 
