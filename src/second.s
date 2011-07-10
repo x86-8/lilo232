@@ -1985,15 +1985,15 @@ notzro:
  iret ; continue with old interrupt
 
 kt_set:
-;;
+;; keyboard table set?? 키보드 테이블의 섹터주소(5byte)
 ;; seg fs ; load the keyboard translation table
- mov cx,par2_keytab ;MSG_OFF+SSDIFF+7
+ mov cx,par2_keytab ;MSG_OFF+SSDIFF+7 ; SSDIFF=0
 ;; seg fs
  mov dx,par2_keytab+2 ;MSG_OFF+SSDIFF+9
 ;; seg fs
  mov al,par2_keytab+4 ;MSG_OFF+SSDIFF+11
 ;;
- mov bx,#Keytable
+ mov bx,#Keytable ; max_secondary+3섹터 오프셋
  ret
 
 
@@ -2114,7 +2114,7 @@ cwr_flags: .byte 0 ; saved flags
 
 kt_read: ; Keytable read
  call kt_set ; set for Keytable i/o ; al, bx, cx, dx에 값을 세팅
- call cread
+ call cread  ; 키테이블 섹터를 읽어들인다.
  jc keyerr
  mov si,#Keytable ; compute a checksum of the keytable
  mov di,#512 - 8 ; skip the last 4+4 bytes
@@ -2124,7 +2124,7 @@ kt_read: ; Keytable read
  cmp eax,dword (di)
  jz nokeyerr
 
-! Checksum error
+! Checksum error ; crc 에러나면 무한루프
 keyerr:
  mov bx,#msg_chkkey
  br zz ; go wait
@@ -2134,17 +2134,17 @@ nokeyerr:
 ! Sector read
 ! enter with AL, CX, DX, ES, BX set for read
 ! trashes CX and DI
-!
+! BX=keytable오프셋, AL=섹터갯수, ...
 cread: ; entry point for mapped device r/w
  call map_device ; DL (logical) -> DL (physical) ???????
 
 cread_physical: ; same entry, device is not mapped
 
-        test dl,#0x40|0x20
+        test dl,#0x40|0x20	; 0x40=LINEAR, 0x20=LBA32
         jnz use_linear
-
+! LINEAR, LBA32 가 꺼져있으면 chs방식으로 읽는다.
         push ax ;save the count
- mov ah,#2 ;read command
+		mov ah,#2 ;read command
         call dsk_do_rw ; int 0x13 with retries
         pop cx ;Carry Set means error on read
         mov al,cl ;count in AL, error code in AH
@@ -2152,21 +2152,21 @@ cread_physical: ; same entry, device is not mapped
 
 use_linear:
         mov ah,hinib ;will be zero for LINEAR
-        xchg al,dh ;AX is possible address
- test dl,#0x20 ;test for LBA32/LINEAR *****
- jz lnread ;pure LINEAR *****
+        xchg al,dh ;AX is possible address ; dh는 헤더
+		test dl,#0x20 ;test for LBA32/LINEAR *****
+		jz lnread ;pure LINEAR ***** ; lba32가 아니면 lnread로 점프
         test dl,#0x40
-        jz lnread
-        mov ah,dh ;former count is really hi-nibble
+        jz lnread		; linear가 아니면 lnread로 점프
+        mov ah,dh ;former count is really hi-nibble ; 둘다 켜지면
         mov hinib,ah
         mov dh,#1 ;set count to 1
 lnread:
-        xchg di,ax ;hi-address to DI
+        xchg di,ax ;hi-address to DI ; lnread = linear read?
         mov al,dh ;count to AL
 
  test dl,#0x10 ; ******
  jz ln_do_read ; ******
-
+! 레이드 비트가 켜지면 추가변환한다.
  call translate ; in volume.S
 
 ln_do_read:
@@ -3470,21 +3470,21 @@ rvi_exit:
 ;
 map_device:
  push si ; save working registers
- push ax
+ push ax ; 쓰이는 레지스터들 보존
  push bx
- mov si,#devmap ; point at translation table
+ mov si,#devmap ; point at translation table ; BSS의 [128] 36바이트 공간
  mov bl,dl
- and bl,#DEV_MASK_asm ; from device code in BL
+ and bl,#DEV_MASK_asm ; from device code in BL ; 0x80+16 -1 = 143(0x8F) 10001111
 
 ; ****** 22.5.6
  seg cs
- mov ah,[init_dx] ; get boot device code
+ mov ah,[init_dx] ; get boot device code ; ah=부팅될때 하드 값 bl=저장된 하드값
  test dl,#0x10
- jnz bios_tt_match ; it is RAID, go use the boot device code
+ jnz bios_tt_match ; it is RAID, go use the boot device code 부트 디바이스의 다섯번째 비트가 켜져 있으면 점프
 ; ***** 22.5.6
-
+! bios translation table next
 bios_tt_next:
- seg cs ; DS may be bad
+ seg cs ; DS may be bad ; devmap에서 순차적으로 값을 읽어와 비교한다. (디바이스 값과 같거나 0이면 끝)
    lodsw ; get from/to pair
  or ax,ax ; end of list?
  jz bios_tt_done
@@ -3492,8 +3492,8 @@ bios_tt_next:
  jne bios_tt_next
 ; got a match
 bios_tt_match:
- and dl,#0xFF-DEV_MASK_asm ; save flags
- or dl,ah ; put on the TO device code
+ and dl,#0xFF-DEV_MASK_asm ; save flags =0x70 중간에 세비트를 
+ or dl,ah ; put on the TO device code ; 저장된 디바이스 코드의 0x10비트가 켜져있으면 bios_tt_match 로 점프해서 keytable의 디바이스(하드) 값의 5-7비트를 부팅된 디바이스 값에 or한다.
 bios_tt_done:
  pop bx
  pop ax
@@ -3581,37 +3581,37 @@ is_prev_mapper:
 
  push #0
  pop es
- seg es
+ seg es	; 세그먼트는 0
 
 
 
-   les di,[4*0x13] ; vector to int 0x13
+ les di,[4*0x13] ; vector to int 0x13
  or di,di
- jnz is_p_no_mapper ; our mappers start at offset 0
-
- mov di,es
+ jnz is_p_no_mapper ; our mappers start at offset 0 ; 할당하는 코드는 0으로 하는걸로 추측한다.
+! 인터럽트 0x13 코드 오프셋이 0이 아니면 점프. 오프셋이 0이면서 세그먼트가 0xA000이상 이거나 0x60미만이면 is_p_no_mapper로 점프한다. 가로채려는 의미로 추측
+ mov di,es		; 세그먼트를 비교한다.
  cmp di,#0xA000 ; start of system reserved locations
  jae is_p_no_mapper
  cmp di,#0x0060 ; VERY conservative
  jb is_p_no_mapper
-
+! 이미 매핑이 되어있으면
 ; first test for new mapper
  xor di,di
- mov cx,#new13_length
- mov si,#new13
+ mov cx,#new13_length ; 길이값
+ mov si,#new13		; 0x13 인터럽트의 코드의 어드레스
  repe
-   cmpsb
+   cmpsb		; new13코드 시작부터 LILO스트링 등을 비교
  jne is_p_try_old
-
+; 후킹할 코드가 같다면
 ; found new (v.22) mapper
  seg es
-   mov di,[new13_drvmap_offset]
+   mov di,[new13_drvmap_offset]	; new13 코드 앞부분 일부의 길이
 
 
 
 
- jmp is_prev_ret
-
+ jmp is_prev_ret ; 리턴한다.
+! 코드가 다르면
 is_p_try_old:
  xor di,di
  mov cx,#new13_old_length
