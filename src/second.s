@@ -3159,21 +3159,21 @@ dsk_do_rw: or ah,#0 ; 0=read, 1=write, 2=read-only test
 dsk_wrflag equ *-1 ; byte data area is the immediate
 # 237 "read.S"
 dsk_do_int13:
-                push bp
+                push bp ; 디스크 읽기를 5번 시도하고 캐리를 보존한다.
                 mov bp,#5 ;number of tries
 dsk_do_int13a: pusha
                 int 0x13
-                jnc dsk_io_exit
+                jnc dsk_io_exit ; 에러가 안나면 리턴
                 dec bp ;does not affect the carry
-                jz dsk_io_exit
+                jz dsk_io_exit ; 5번 실패하면 리턴
                 xor ax,ax ;reset disk controllers
                 int 0x13
                 popa
                 dec bp
                 jmp dsk_do_int13a
 
-dsk_io_exit: mov bp,sp ;do not touch any flags
-                lea sp,(bp+16) ;an ADD would touch flags
+dsk_io_exit: mov bp,sp ;do not touch any flags ; add명령을 쓰면 3줄을 한줄로 바꿀수 있지만 플래그를 건드리기 때문에 lea를 쓴다.
+                lea sp,(bp+16) ;an ADD would touch flags 
                 pop bp ;do not touch any flags
                 ret
 
@@ -3227,8 +3227,8 @@ build_vol_tab:
  xor dx,dx
  xchg [devmap],dx ; clear our First Stage mapping
 
- call is_prev_mapper ; is there a previous mapper
- jz bvt0
+ call is_prev_mapper ; is there a previous mapper ; 인터럽트 0x13이 매핑되었는지 확인한다.
+ jz bvt0 ; 매핑이 안되어있다면 점프
 
 ; have previous mapper active
 
@@ -3257,34 +3257,34 @@ bvt0:
  pop es ; restore ES
 
 ; ****** 22.5.8
- mov di,#Keytable+256+mt_serial_no
- mov cx,#MAX_BIOS_DEVICES_asm
+ mov di,#Keytable+256+mt_serial_no ; 키테이블 크기는 256, 뒤에 Menutable 스트럭쳐로 추측한다.
+ mov cx,#MAX_BIOS_DEVICES_asm ; = 16
  xor eax,eax
- repe
+ repe	 ; mt_serial_no부터 0이 아닌값을 찾는다.
    scasd ; scan for any serial nos in table
- je bvt90 ; if none, skip reading vol_ids
+ je bvt90 ; if none, skip reading vol_ids ; 메뉴테이블 값이 전부 0이면 bvt90으로 점프한다.
     ; as there will be no translations
 ; ****** 22.5.8
 
 
  xor cx,cx ; start at hard drive 0 (0x80)
- mov di,#vtab ; place to put IDs
+ mov di,#vtab ; place to put IDs ; volume table
 bvt1:
  call read_vol_id ; get VolumeID in EAX
- stosd ; store in table
+ stosd ; store in table ; 읽어온 볼륨ID를 vtab에 저장한다.
  or eax,eax ; test for zero
- jz bvt9 ; end, or no volume ID
+ jz bvt9 ; end, or no volume ID ; 볼륨ID가 없으면 끝나거나 레이드 비교
 
 ; now see if there will be a translation
- push di
+ push di ; 연산하기 위해 값을 보존
  push cx
 
 ; ****** 22.5.9
- mov cx,di ; 4*table count to CX
- mov di,#vtab
- sub cx,di ; 4*count
- shr cx,#2 ; table count
- dec cx
+ mov cx,di ; 4*table count to CX ; CX=device code , di=vtab+4
+ mov di,#vtab 
+ sub cx,di ; 4*count ; 저장된 vtab의 길이 - vtab = 저장된 볼륨ID 길이
+ shr cx,#2 ; table count ; / 4 해서 갯수가 나온다.
+ dec cx ; 갯수 - 1
  jz bvt1.5 ; table empty
  repne ; repeat while no match
    scasd
@@ -3360,19 +3360,19 @@ bvt90:
  xor bx,bx ; count thru devices
 bvt91:
  xor eax,eax ; may store 0
- shr dx,#1 ; is it raid?
- jnc bvt92 ; not a raid device
+ shr dx,#1 ; is it raid? ; mt_raid_dev_mask의 비트로 n번째 하드가 레이드인지  확인한다. 아니면 bvt92로 점프한다. (1bit를 shift하면 바이트 크기를 줄일수 있다.)
+ jnc bvt92 ; not a raid device ; 레이드가 아니면 리턴
 
  lodsd ; get raid offset
  push eax ; save value in stack
 
- mov eax,[Keytable+256+mt_serial_no](bx)
+ mov eax,[Keytable+256+mt_serial_no](bx) ; 2중루프로
  mov di,#vtab ; physical table address
  mov cx,#MAX_BIOS_DEVICES_asm
  repne
    scasd ; scan for a match
  jne bvt_not_found ; the logical volume is not there
- lea di,(di-4-vtab) ; DI is 4*index into table
+ lea di,(di-4-vtab) ; DI is 4*index into table ; 볼륨ID가 같으면 
  mov cx,di
  shr cx,#2 ; make 0..15
  mov ax,#1
@@ -3383,7 +3383,7 @@ bvt91:
 bvt_not_found:
  pop eax ; clean up the stack
 bvt92:
- add bx,#4 ;
+ add bx,#4 ; for(bx=0;bx<16*4;bx+=4)
  cmp bx,#MAX_BIOS_DEVICES_asm*4
  jb bvt91
 # 294 "volume.S"
@@ -3417,36 +3417,36 @@ read_vol_id:
  push cx
  push es ; paranoia (floppies touch it)
 
- mov ah,#8 ; get number of drives in DL
+ mov ah,#8 ; get number of drives in DL 
  mov dl,#0x80
  call dsk_do_int13 ; retry 5 times
 
  pop es
  pop cx ; restore device code
 
- jc rvi_9
- cmp cl,dl
- jae rvi_9
+ jc rvi_9 ; 디스크 읽기가 실패하면 rvi_9로 점프
+ cmp cl,dl ; dl = 드라이브 갯수
+ jae rvi_9 ; cl이 드라이브 갯수보다 더 커지면 종료
 
- mov dl,cl
- mov cx,#1
- mov bx,#Map
- or dl,#0x80
- mov dh,ch
+ mov dl,cl ; cl(드라이브) 값을 dl에 저장
+ mov cx,#1 ; cx = cylinder , sector
+ mov bx,#Map ; 쓸 메모리 주소
+ or dl,#0x80 ; 드라이브 값에 0x80을 더해준다.
+ mov dh,ch ; head, ch=0
 ; ****** 22.6.1
 
 
-
+; MBR을 읽어온다.
 ; ****** 22.6.1
  mov ax,#0x201 ; read
  call dsk_do_int13
  jc rvi_9
 
  seg es
-   mov eax,(bx+0x1be -6) ; fetch return
+   mov eax,(bx+0x1be -6) ; fetch return ; eax에 volumeID를 읽어온다.
  jmp rvi_exit
 rvi_9:
- xor eax,eax
+ xor eax,eax ; rvi_9는 에러나면 eax를 0으로 하고 CF=1로 한다.
  stc
 rvi_exit:
  pop di
@@ -3601,7 +3601,7 @@ is_prev_mapper:
  mov si,#new13		; 0x13 인터럽트의 코드의 어드레스
  repe
    cmpsb		; new13코드 시작부터 LILO스트링 등을 비교
- jne is_p_try_old
+ jne is_p_try_old ; new13코드와 다르면 is_p_try_old로 분기
 ; 후킹할 코드가 같다면
 ; found new (v.22) mapper
  seg es
@@ -3609,24 +3609,24 @@ is_prev_mapper:
 
 
 
-
- jmp is_prev_ret ; 리턴한다.
-! 코드가 다르면
+! es = int13h 인터럽트의 세그먼트
+ jmp is_prev_ret ; 이미 매핑되어 있고 new13 코드와 같다면 리턴한다.
+! 이미 매핑이 되어있다면 코드가 같은지 비교한다
 is_p_try_old:
  xor di,di
- mov cx,#new13_old_length
- mov si,#new13_old
+ mov cx,#new13_old_length ; 길이-2로 mov di,에서 멈춘다. 
+ mov si,#new13_old 
  repe
    cmpsb
- jne is_p_no_mapper
-
+ jne is_p_no_mapper ; 
+; new13_old와 매핑값이 같으면 그 다음
 ; likely old (<=v.21) mapper
  seg es
-   mov di,(di)
- cmp di,#new13_old_min_offs ; validate the range of values
+   mov di,(di) ; new13_old 코드에서 di에 들어가는 값과 비교한다.
+ cmp di,#new13_old_min_offs ; validate the range of values ; 0x46 = 70 보다 작으면 매핑이 안되어있다.
  jb is_p_no_mapper
- cmp di,#new13_old_max_offs ; validate the range of values
-
+ cmp di,#new13_old_max_offs ; validate the range of values ; 0x50 = 80
+; 70이상 80이하면 매핑이 되어있다는 의미로 추측
 
 
 
@@ -3634,7 +3634,7 @@ is_p_try_old:
 
  jbe is_prev_ret
 
-
+; 매핑이 안돼있으면 DI=0(ZF=1)과 함께 리턴한다. 매핑이 되어있다면 di는 0이 아니다. (ZF=0)
 is_p_no_mapper:
  xor di,di ; set DI = 0, ZF=1
 is_prev_ret:
@@ -3644,14 +3644,14 @@ is_prev_ret:
  ret
 
 
-
+; 비교하기 위한 루틴
 new13_old:
  push ax ! save AX (contains function code in AH)
  push bp ! need BP to mess with stack
  mov bp,sp
  pushf ! push flags (to act like interrupt)
  push si
- mov si,#drvmap-new13
+ mov si,#drvmap-new13 
 
 new13_old_drvmap_offs = * - new13_old - 2
 new13_old_length = new13_old_drvmap_offs
@@ -4849,10 +4849,10 @@ vtab = *
 rtab = *
  .org *+MAX_BIOS_DEVICES_asm*4 ; raid offsets indexed the same
 
-
+; devmap은 로지컬 device code를 피지컬 코드로 변환하는 정보를 가지고 있다.
 devmap = *
  .org *+16*2+4 ; device code map
-     ; logical -> physical
+     ; logical -> physical  
      ; (lo-byte::hi-byte)
 # 4163 "second.S" 2
 
