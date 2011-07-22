@@ -175,11 +175,11 @@ gdt: ; space for BIOS
  .word 0 ; padding for 80286 mode :-(
  ; space for BIOS
  .blkb 0x10
-
+! start: 에서 continue:까지는 자기복제 루틴이다.
 start: cld ; only CLD in the code; there is no STD
 
- push ds ; fs에 0x7c0을 넣어준다.
- pop fs ; address parameters from here
+ push ds 
+ pop fs ; address parameters from here ; fs = 0x07c0
 
 
 
@@ -187,42 +187,42 @@ start: cld ; only CLD in the code; there is no STD
 
 
  seg cs	; segment prefix = cs: = 2Eh
- mov [init_dx],dx ; save DX passed in from first.S ; DX값 확인!
+ mov [init_dx],dx ; save DX passed in from first.S ; DX(시작 드라이브)의 정보를 [cs:init_dx]에 저장한다.
 
- int 0x12 ; get memory available ; EBDA를 제외한 사용가능한 메모리 공간(1k단위) 테스트 결과:640 내의 결과가 나온다. EBDA의 크기가 클 수 있기 때문에 가변적인 계산을 한다.
-
-
+ int 0x12 ; get memory available ; 메모리의 값. ax = 640-EBDA(KB) 값을 리턴한다.
 
 
- shl ax,#6 ; convert to paragraphs ; 1k단위는 byte에 10비트 shift한것과 같다. 여기서 6비트 왼쪽 시프트하면 세그먼트값이 들어간다 . = 바이트 크기 / 16
- sub ax,#Dataend/16 ; 640k - 크기(10kb정도로 추정) 위치에 복사한다. 사용가능한 램의 끝부분에 위치시킨다.
+
+
+ shl ax,#6 	; convert to paragraphs ; ax의 KB 단위를 세그먼트 단위로 바꾼다.
+ sub ax,#Dataend/16 ; ax=640-EBDA-second길이. 최대한 끝에 코드를 옮기기 위한 세그먼트 세팅 
  mov es,ax ; destination address
  push cs ; 0x880
  pop ds  ; 0x880
  xor si,si
  xor di,di
- xor ax,ax
- mov cx,#max_secondary/2 ; count of words to move ; 코드영역 크기
+ xor ax,ax 			; 코드를 복제하기 위해 레지스터들을 세팅한다.
+ mov cx,#max_secondary/2 ; count of words to move ; 워드 단위로 옮기기 위해 cx=코드(max_secondary)길이/2 
  rep
-   movsw	; 코드영역(시작-max_secondary) 복사
- add di,#BSSstart-max_secondary	; 코드+BSS사이의 7섹터를 넘긴다.
- mov cx,#BSSsize/2
+   movsw			; 코드/데이터영역 복사 (_main ~ max_secondary) 
+ add di,#BSSstart-max_secondary	; 코드끝에서 BSSstart사이는 넘어간다. (7섹터)
+ mov cx,#BSSsize/2	; 이 소스에서는 512bytes 를 넘지않을것으로 보인다.
  rep
-   stosw	; BSS 초기화
- push es
- push #continue
- retf ; branch to continue address ; 메모리 공간을 얻어 자가복제후 점프
+   stosw	; BSS를 0으로 초기화
+ push es	; 점프후 cs는 메모리 끝 second 시작부분의 세그먼트가 들어간다.
+ push #continue		; 복제코드의 continue:로 점프하기 위한 push
+ retf ; branch to continue address ; 복제코드로 점프
 continue:
 # 231 "second.S"
- call serial_setup ; set up the COM port, if any
+ call serial_setup ; set up the COM port, if any ; COM 포트를 초기화한다.
 
 
-
- mov cx,#32 ; drain type-ahead buffer ?
-drkbd: mov ah,#1 ; is a key pressed ?
+! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터의 32bytes의 원형 키보드 큐 버퍼가 있다. 이를 위해 32번 반복하는걸로 추측한다.
+ mov cx,#32 ; drain type-ahead buffer ? 
+drkbd: mov ah,#1 ; is a key pressed ? ; drain keyboard?
  int 0x16
- jz comcom ; no -> done ; 키가 눌렸으면 comcom으로 점프
- xor ah,ah ; get the key ; 아니면 키눌림을 기다린다.
+ jz comcom ; no -> done ; 키가 안눌렸으면 이 루프을 건너뛴다.
+ xor ah,ah ; get the key ; 키가 눌렸다면 키값을 받아 키 버퍼를 비운다.
  int 0x16
  loop drkbd
 
@@ -230,38 +230,38 @@ drkbd: mov ah,#1 ; is a key pressed ?
 comcom:
 
  mov al,#0x4c ; display an 'L'
- call display
+ call display	; LILO의 3번째 문자 L을 출력한다.
  push #0 ; get pointer to disk parameter table in DS:SI
  pop ds
- lds si,[0x78] ; 0x78 = 4*0x1E ; 인터럽트 0x1e 주소(Disk Initialization Parameter)를 ds:si에 가져온다.
+ lds si,[0x78] ; 0x78 = 4*0x1E ; 인터럽트 0x1e(Disk Initialization Parameter) 주소를 DS:SI에 가져온다.
 
- cmp byte ptr (si+4),#9 ; okay ? 3.5인치가 18, 5.25인치가 9
+ cmp byte ptr (si+4),#9 ; okay ? 3.5 720k, 5.25 360k 이하는 SPT가 9 이하다. 9를 넘는다면 dskok
  ja dskok ; yes -> do not patch
-
+! SPT가 9 이하라면 복사후 SPT를 18로 바꾸고 lilo의 disk parameter를 사용한다.
  push cs ; get pointer to new area in ES:DI
  pop es
- mov di,#dskprm
- mov cx,#6 ; copy 12 bytes
+ mov di,#dskprm		; second의 dskprm으로 복사한다.
+ mov cx,#6 ; copy 12 bytes	; 파라미터는 12바이트
  rep
- movsw	; 0x1e 인터럽트의 sector per track이 9보다 작으면 12바이트의 디스켓 정보를 second stage의 [dskprm]으로 옮기고 si+4(옮긴후의 di-8)에 18을 넣는다. 
+ movsw	; second stage의 [dskprm]으로 옮긴다 
  seg es ; patch number of sectors
 
- mov byte ptr (di-8),#18
-
-
+ mov byte ptr (di-8),#18	; SPT(파라미터+4 == 끝-8)에 18을 넣는다. 
+! 3.5인치 720k와 1.44M은 섹터크기가 각각 9, 18이다. 18을 넣어주는것은 이와 관련있지 않을까 추측한다.
+! 섹터크기가 9이하라면 디스크 상태가 이상한게 아니냐는 추측도 있었다.
 
  push #0
  pop ds
  cli ; paranoia
- mov [0x78],#dskprm ; Disk init prarameter를 복사후에 0x1e 주소를 바꾼다.
- mov [0x7a],es		; 섹터크기가 9보다 작으면 바꿔치기 한다. (SPT가 9이하면 디스크가 이상한 상태?)
+ mov [0x78],#dskprm ; 복사후 lilo의 파라미터를 사용한다.
+ mov [0x7a],es		
  sti
 dskok:
 
  seg cs ; clear the break flag
- mov byte ptr break,#0
+ mov byte ptr break,#0	; break=0, 시리얼출력(serdisp)에서 LSR의 break에 따라 1이되기도 한다.
 
- call instto ; get timer interrupt ; 타이머 인터럽트 핸들러(0x1c)를 tick으로 바꾼다.
+ call instto ; get timer interrupt ; 타이머 인터럽트 핸들러(0x1c)를 tick으로 가로챈다.
 
 ;;; jmp restrt ; get going
 
@@ -1813,12 +1813,12 @@ display:
  push bx ; save BX
 
 
- call serdisp
+ call serdisp	; serial display?
 # 2353 "second.S"
 ;;; xor bh,bh ; display on screen
- mov bx,#7 ; set color for 0x9dd476ec interface
+ mov bx,#7 ; set color for 0x9dd476ec interface	; bh = page number, bl = foreground color, 7은 밝은회색
  mov ah,#14
- int 0x10
+ int 0x10	; al의 한글자를 쓴다.
 
 dispret:
  pop bx ; restore BX
@@ -1828,19 +1828,19 @@ dispret:
 
 serdisp:push dx ; wait for space in the send buffer
  seg cs
- mov dx,slbase
+ mov dx,slbase	; 3F8h, 2F8h등 base는 receiver buffer, transmitter holding register 다
  or dx,dx
- jz serret
- add dx,#5
+ jz serret	; slbase가 0이면 리턴한다.
+ add dx,#5	; slbase + 5
  push ax
-serwait:in al,dx
- test al,#0x10 ; break -> set break flag
- jz nobrk
+serwait:in al,dx	; LSR(line status register)에서 1byte 읽어온다.
+ test al,#0x10 ; break -> set break flag	; bit 4 = break interrupt
+ jz nobrk	;	비트가 꺼져있으면 nobrk
  seg cs
  mov byte ptr break,#1
-nobrk: test al,#0x20 ; ready to send ?
- jz serwait ; no -> wait
- sub dx,#5 ; send the character
+nobrk: test al,#0x20 ; ready to send ?	; bit 5 = emptry transmitter holding register
+ jz serwait ; no -> wait	; bit 5가 꺼져있으면 대기
+ sub dx,#5 ; send the character	; bit5가 켜져있으면 비어있다. 송신버퍼에 출력한다.
  pop ax
  out dx,al
 serret: pop dx ; done
@@ -1934,15 +1934,15 @@ shpress:stc ; set carry
 
 ! Timeout handling
 
-instto: push ds ; install the timeout handler ; 타이머 인터럽트 (0x1c)를 tick 루틴으로 교체한다.
+instto: push ds ; install the timeout handler ; 타이머 인터럽트 (0x1c)에 타임아웃 핸들러 설치
  push #0
  pop ds
 
  cli ; no interrupts
  mov eax,[0x1c*4] ; get the old vector
  seg cs
- mov [int1c_l],eax ; save H & L parts
- mov [0x1c*4],#tick ; install new vector
+ mov [int1c_l],eax ; save H & L parts	; int1c_l에 원래 루틴 주소를 저장하고
+ mov [0x1c*4],#tick ; install new vector	; 인터럽트 핸들러를 가로챈다
  mov [0x1c*4+2],cs
  sti ; done
  pop ds
@@ -1972,16 +1972,16 @@ toimmed:mov byte ptr timeout,#0xff ; set the timed-out flag
 
 tick: pushf ; save flags ; 대체되는 0x1c 타이머 인터럽트 루틴
  seg cs ; no timeout ?
- cmp word ptr cntdown,#0xffff	; 0xffff면 카운트되지 않는다.(틱감소 없음)
+ cmp word ptr cntdown,#0xffff	; 0xffff면 timeout 되지 않는다.
  je notzro ; yes -> go on
  seg cs ; decrement counter
  dec word ptr cntdown
- jnz notzro ; not zero -> go on
+ jnz notzro ; not zero -> go on	; cntdown--가 0이 아니면 리턴
  seg cs ; set timeout flag
- mov byte ptr timeout,#0xff	; cntdown을 감소시켜서 0이되면 timeout에 0xff를 넣는다.
+ mov byte ptr timeout,#0xff	; cntdown이 0이되면 timeout= 0xff
 notzro:
  seg cs
- push dword [int1c_l]	; 원래 0x1c 루틴으로 점프
+ push dword [int1c_l]	; 0x1c의 원래 인터럽트 루틴으로 점프 (플래그는 복구된다)
  iret ; continue with old interrupt
 
 kt_set:
@@ -2555,25 +2555,25 @@ divisor:
 ; No registers are saved
 ;
 serial_setup:
-;; com port를 초기화
+
 ;; seg fs
- mov dx,par2_port ; use a COM port ?
+ mov dx,par2_port ; use a COM port ?	; par2_port와 par2_ser_param를 가져온다.
    ; watch out, loads par2_ser_param
 ;;
  dec dl
- js nocom ; no -> go on
+ js nocom ; no -> go on		; 감소시켰을때 MSB가 켜져있다면 리턴
  xor ax,ax ; initialize the serial port
- xchg al,dh
+ xchg al,dh	; al = par2_ser_param, dh = 0
 
  push ax
  push dx
 
 ;;; or al,#0x06 ; stop bits = 2, nbits = 7 or 8
     ; this OR is not needed yet (21.7)
- int 0x14 ; Communications Port INIT
+ int 0x14 ; Communications Port INIT ; ah=0 serial port 초기화, DX=RS232 카드 넘버
 
  push #0x40
- pop ds
+ pop ds	; ds = 0x40
 
  pop bx ; was DX
 
@@ -4757,7 +4757,7 @@ init_dx: .word 0
 hinib: .byte 0 ; hi-nibble of address
 tempal: .byte 0
 moff: .word 0 ; map offset
-map: .word Map ; map to use
+map: .word Map ; map to use ; 덤프결과 0x2800
 
 cntdown:.word 0 ; count-down
 timeout:.byte 0 ; timed out
