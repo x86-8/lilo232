@@ -3280,13 +3280,13 @@ bvt1:
  push cx
 
 ; ****** 22.5.9
- mov cx,di ; 4*table count to CX ; CX=device code , di=vtab+4
+ mov cx,di ; 4*table count to CX ; CX=device code , 첫번째는 cx=vtab+4
  mov di,#vtab 
- sub cx,di ; 4*count ; 저장된 vtab의 길이 - vtab = 저장된 볼륨ID 길이
- shr cx,#2 ; table count ; / 4 해서 갯수가 나온다.
+ sub cx,di ; 4*count ; 저장된 vtab의 길이 - 첫vtab offset = 저장된 볼륨ID 길이
+ shr cx,#2 ; table count ; 저장된 offset / 4 해서 갯수가 나온다.
  dec cx ; 갯수 - 1
  jz bvt1.5 ; table empty
- repne ; repeat while no match
+ repne ; repeat while no match ; 읽어온 볼륨ID(eax)값을 
    scasd
  jne bvt1.5
 
