@@ -269,29 +269,29 @@ dskok:
 
 restrt: mov bx,cs ; adjust segment registers
  mov ds,bx
- mov es,bx
+ mov es,bx	; ds=es=cs
 
  sub bx,#63*0x20+0x20 ; segment for setup code & MAX_SETUPSECS=커널에서 SETUP의 최대 크기(63); cs - 0x800 = 2048 (바이트 단위로 32k) 
       ; bootsect
  mov cx,#INITSEG ; 0x9000
- cmp bx,cx ; 할당된 메모리공간 - 0x800
- jbe restrt1 ; lilo크기+EBDA크기-32k가 0x9000보다 작으면 -32k, 크면 0x9000 
- mov bx,cx ; BX is the smaller segment # 메모리가 608이상 여유가 있으면 initseg를 0x9000으로 하고 아니면 second 복사주소 -최대setup크기(32k)를 initseg로 한다. 
+ cmp bx,cx ; bx=second세그먼트-0x800
+ jbe restrt1 ; bx는 0xA000(640kb)-second크기-EBDA-32kb다. 이 값이 0x9000(576kb)이하라면 이 값을 그대로 쓰고 0x9000보다 크다면 [initseg]=0x9000 (second+EBDA+32kb < 64kb 면 0x9000)
+ mov bx,cx ; BX is the smaller segment 
 restrt1:
  mov word ptr [map],#Map = max_secondary + 512
- mov [initseg],bx ; set up INITSEG (was 0x9000) ; bootsect가 위치할곳
+ mov [initseg],bx ; set up INITSEG (was 0x9000) ; initseg=cs 
  lea cx,(bx+0x20)
- mov [setupseg],cx ; set up SETUPSEG (was 0x9020) ; 커널의 setup이 위치할곳
+ mov [setupseg],cx ; set up SETUPSEG (was 0x9020) ; initseg 한섹터 뒤
  mov cx,cs
- sub cx,bx ; subtract [initseg]
- shl cx,#4 ; get stack size	; initseg만큼 빼서 offset만 구한다. 세그먼트와 오프셋을 분리한다.
+ sub cx,bx ; subtract [initseg]	; cs-initseg 세그먼트와 오프셋을 분리한다.
+ shl cx,#4 ; get stack size	; 스택의 크기(bytes) = offset
  mov ss,bx ; must lock with move to SP below ; INITSEG (0x9000)
- mov sp,cx ; data on the stack)
+ mov sp,cx ; data on the stack)	; 스택은 second 코드 바로 아래에 있다.
 # 392 "second.S"
- cmp dword [sig],#0x4f4c494c ; "LILO" ; 제대로 복사됐는지 확인. (sig=="LILO")
- jne crshbrn2
- cmp dword [mcmdbeg+6],#0x4547414d ; "MAGE" from BOOT_IMAGE
- jne crshbrn2
+ cmp dword [sig],#0x4f4c494c ; "LILO" ; 첫부분 문자열 확인. (sig=="LILO")
+ jne crshbrn2	; crshbrn로 가서 signature not found 출력후 대기-무한루프
+ cmp dword [mcmdbeg+6],#0x4547414d ; "MAGE" from BOOT_IMAGE	; 끝부분 BOOT_IMAGE 문자열에서 MAGE
+ jne crshbrn2	
  cmp BYTE [stage],#2
 
  jne crshbrn
