@@ -895,7 +895,7 @@ void geo_get(GEOMETRY *geo,int device,int user_device,int all)
     int i;
 
     for(i = 0; i < dm_major_nr; i++)
-	if (MAJOR(device) == dm_major_list[i])
+	if (MAJOR(device) == dm_major_list[i]) 
 	    break;
     while (i < dm_major_nr) {
 	DM_TABLE *dm_table;

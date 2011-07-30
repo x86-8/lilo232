@@ -217,7 +217,7 @@ continue:
  call serial_setup ; set up the COM port, if any ; COM 포트를 초기화한다.
 
 
-! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터의 32bytes의 원형 키보드 큐 버퍼가 있다. 이를 위해 32번 반복하는걸로 추측한다.
+! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터의 32bytes의 원형 키보드 큐 버퍼가 있다. 하지만 2씩 증가(scan,ascii)하기 때문에 2루프를 비워주는걸로 보인다.
  mov cx,#32 ; drain type-ahead buffer ? 
 drkbd: mov ah,#1 ; is a key pressed ? ; drain keyboard?
  int 0x16

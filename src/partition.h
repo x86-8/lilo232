@@ -61,7 +61,7 @@ int part_nowrite(char* device);
    	NTFS
    	DOS FAT (relocation will fix)
 */
-
+// 부트 블럭 체크
 #define is_extd_part(x) ((x)==PART_DOS_EXTD||(x)==PART_WIN_EXTD_LBA||(x)==PART_LINUX_EXTD)
 
 void part_verify(int dev_nr,int type);

@@ -129,7 +129,7 @@ void geo_get(GEOMETRY *geo,int device,int user_device,int all);
 /* Obtains geometry information of the specified device. Sets the BIOS device
    number to user_device unless -1. If ALL is zero, only the BIOS device number
    is retrieved and the other geometry information is undefined. */
-
+// 디바이스 넘버를 user_device에 넣고 인자 all이 0이면 디바이스 넘버만 입력하고 나머지 값들은 따로 설정하지 않는다.
 
 int geo_open(GEOMETRY *geo,const char *name,int flags);
 /* Opens the specified file or block device, obtains the necessary geometry
