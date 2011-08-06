@@ -32,11 +32,8 @@ Kernel 스터디 8차 (x86 초급) 위키 페이지입니다.
 13:2011/06/18:12:<first.s> _main(218-338) / first.s 완료
 14:2011/06/25:11:<second.s> _main(1-278) / 스터디후 간단한 회식
 15:2011/07/02:11:<second.s> _main(1-336)->kt_read(2115-2117)
-
 16:2011/07/09:12:<second.s> _main(336-338)->build_vol_tab(3223-3230)->is_prev_mapper(3577-3615)
-
 17:2011/07/16:13:<second.s> _main(338)->build_vol_tab(3230-3288)
-
 18:2011/07/23:10:<lilo.c> main(556-954)->geo_init(geometry.c:147-215)
-
 19:2011/07/30:09:<lilo.c> main(954-1035) / lilo.c 완료
+20:2011/08/06:10:<second.s> _main(338-449)

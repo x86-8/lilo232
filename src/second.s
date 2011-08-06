@@ -261,7 +261,7 @@ dskok:
  seg cs ; clear the break flag
  mov byte ptr break,#0	; break=0, 시리얼출력(serdisp)에서 LSR의 break에 따라 1이되기도 한다.
 
- call instto ; get timer interrupt ; 타이머 인터럽트 핸들러(0x1c)를 tick으로 가로챈다.
+ call instto ; get timer interrupt ; 타이머 인터럽트 핸들러(0x1c)를 tick레이블에 해당하는 서비스 루틴을 설치한다.
 
 ;;; jmp restrt ; get going
 
@@ -327,7 +327,7 @@ end_tt:
 ! ldsc: 키보드 테이블 로드, 볼륨테이블 생성, DFL, 디스크립터 로드. 키보드 체크
 ldsc:
 ! load descriptor
- seg fs
+ seg fs ; first (0x7c0)
  mov eax,[par1_mapstamp]	; map file이 만들어진 시간(first)
 
  cmp eax,[par2_mapstamp]
@@ -335,31 +335,31 @@ ldsc:
 
  call kt_read ; read the Keytable
 
- call build_vol_tab
+ call build_vol_tab ; 볼륨 테이블을 만든다.
 
- mov bx,#Descr
- mov si,#Keytable+256+mt_descr
+ mov bx,#Descr ; 인터럽트시 사용되는 버퍼 어드레스(es:bx)
+ mov si,#Keytable+256+mt_descr ; 디스크립터의 섹터 주소
 descr_more:
  lodsw
  xchg cx,ax
  lodsw
  xchg dx,ax
  lodsb
- call cread
- jc near fdnok ; error -> retry
- add bh,#2 ; increment address
- cmp si,#Keytable+256+mt_descr+sa_size*MAX_DESCR_SECS_asm
- jb descr_more
+ call cread ; 섹터 읽는다.
+ jc near fdnok ; error -> retry ; 에러나면 ldsc로 점프
+ add bh,#2 ; increment address ; 저장할 다음 어드레스 (+0x200==512)
+ cmp si,#Keytable+256+mt_descr+sa_size*MAX_DESCR_SECS_asm ; 오프셋이 최대 디스크립터 오프셋보다 작으면 루프
+ jb descr_more ; 디스크립터를 다 읽어들인다.
 
  mov si,#Descr ; compute a checksum of the descriptor table
  mov di,#512*3 -4
 
- push dword #0x04c11db7
+ push dword #0x04c11db7 ; crc 32비트에서 많이 쓰이는 키값
  call crc32
  add di,si
  cmp eax,dword (di)
  jz nochkerr
-
+! chkerr로 가야할것 같다. 
 
 ! Timestamp error
 timeerr:
@@ -381,21 +381,21 @@ zzz: hlt ; wait for interrupt
 nochkerr:
 # 495 "second.S"
 ; remove those items that have "vmdisable", if virtual boot
- call vmtest
- jnc virtual_done
- mov di,#DESCR0 ; point at first descriptor
+ call vmtest ; vmware가 동작중인지 테스트
+ jnc virtual_done ; vmware가 안돌면 virtual_done으로 점프
+ mov di,#DESCR0 ; point at first descriptor ; 디스크립터(커널 이름,패스워드, 램디스크사이즈,vga_mode 등 ) 정보 메모리 주소
 vir_loop:
- test byte ptr [id_name](di),#0xFF ; test for NUL name
+ test byte ptr [id_name](di),#0xFF ; test for NUL name ; 끝이면 virtual_done으로 간다.
  jz virtual_done
- test word ptr [id_flags](di),#512
+ test word ptr [id_flags](di),#512 ; FLAG_VMDISABLE가 꺼져있으면 스킵
  jz vir_skip
 
  push di
- lea si,[id_size](di)
+ lea si,[id_size](di) ; 디스크립터 구조체 한개의 크기 [di+id_size]
 vir_loop1:
  mov cx,#id_size
  rep
-    movsb
+    movsb ; FLAG_DISABLE이 켜있으면 넘기고 덮어씌운다.
  test byte ptr [id_name](di),#0xFF
  jnz vir_loop1
 
@@ -403,7 +403,7 @@ vir_loop1:
  jmp vir_loop
 
 vir_skip:
- add di,#id_size
+ add di,#id_size ; 다음 디스크립터를 지정한다.
  jmp vir_loop
 
 virtual_done:
@@ -411,12 +411,12 @@ virtual_done:
 
 ; remove those items that have "nokbdisable", if nokeyboard boot
  call kbtest
- jc kbd_done
+ jc kbd_done ; 정상이면 kbd_done로 점프
  mov di,#DESCR0 ; point at first descriptor
 kbd_loop:
  test byte ptr [id_name](di),#0xFF ; test for NUL name
  jz kbd_done
- test word ptr [id_flags](di),#0x8000
+ test word ptr [id_flags](di),#0x8000 ; #FLAG_NOKBDISABLE ; NOKBDISABLE이 꺼져있으면 스킵. 플래그가 켜진것만 남기고 덮어쓴다.
  jz kbd_skip
 
  push di
@@ -437,8 +437,8 @@ kbd_skip:
 
 kbd_done:
 # 560 "second.S"
- mov bx,#Keytable+256
- mov al,(bx+mt_flag)
+ mov bx,#Keytable+256 ; Menutable
+ mov al,(bx+mt_flag) ; 플래그를 가져온다. FLAG_NOBD등
 
  seg fs ; get possible 16
  or byte ptr [par1_prompt+SSDIFF],al
@@ -1987,13 +1987,13 @@ notzro:
 kt_set:
 ;; keyboard table set?? 키보드 테이블의 섹터주소(5byte)
 ;; seg fs ; load the keyboard translation table
- mov cx,par2_keytab ;MSG_OFF+SSDIFF+7 ; SSDIFF=0
+ mov cx,par2_keytab ;MSG_OFF+SSDIFF+7 ; SSDIFF=0 ; kt_cx
 ;; seg fs
- mov dx,par2_keytab+2 ;MSG_OFF+SSDIFF+9
+ mov dx,par2_keytab+2 ;MSG_OFF+SSDIFF+9 ; kt_dx
 ;; seg fs
- mov al,par2_keytab+4 ;MSG_OFF+SSDIFF+11
+ mov al,par2_keytab+4 ;MSG_OFF+SSDIFF+11 ; kt_al
 ;;
- mov bx,#Keytable ; max_secondary+3섹터 오프셋
+ mov bx,#Keytable ; max_secondary+1536 오프셋
  ret
 
 
@@ -2113,7 +2113,7 @@ cwr_flags: .byte 0 ; saved flags
 
 
 kt_read: ; Keytable read
- call kt_set ; set for Keytable i/o ; al, bx, cx, dx에 값을 세팅
+ call kt_set ; set for Keytable i/o ; kt_dx,kt_cx,kt_al의 키보드 테이블 섹터주소 읽고 bx엔 Keytable의 오프셋을 넣는다.
  call cread  ; 키테이블 섹터를 읽어들인다.
  jc keyerr
  mov si,#Keytable ; compute a checksum of the keytable
@@ -2181,9 +2181,9 @@ ln_do_read:
 vmtest:
 
  pushad ; save all extended registers
- smsw ax
+ smsw ax ; msw를 읽어들인다.
  rcr al,1 ; PE bit in AL to Carry
- jc vm_ret ; exit if virtual mode
+ jc vm_ret ; exit if virtual mode ; PE비트가 켜져있으면 리턴
 
 
 
@@ -2206,16 +2206,16 @@ vmtest:
  mov edi,eax
  mov dx,#0x5658 ; DX: in = 'VX'
  mov ecx,#10 ; ECX: in = VMXGetVersion
- in eax,dx
- cmp ebx,edi ; test for vmware
- clc ; NOT vmware if Carry==0
- jne vm_ret ; not vmware
+ in eax,dx	; 5658 포트에서 4바이트를 읽는다.
+ cmp ebx,edi ; test for vmware ; 0x5658 포트에서 읽어들이면 ebx에 0x564d5868 값이 들어간다.
+ clc ; NOT vmware if Carry==0 ; 도중에 분기할때를 위한 리턴값 cf=0
+ jne vm_ret ; not vmware ; vmware가 없다면 cf=0
 
  inc eax ; carry is not affected by INC
  jz vm_ret ; invalid version number == 0xFFFFFFFF
 
 vm_vir:
- stc ; signal virtual mode
+ stc ; signal virtual mode ; vmware가 있으면 cf=1
 
 vm_ret: popad ; restore all the extended registers
  ret
@@ -2228,21 +2228,21 @@ kbtest:
 ;
 ; If neither nokbdefault nor nokbdisable was used, we do not touch
 ; the keyboard hardware. Always report Carry=1 (keyboard present).
-;
- test byte ptr [par2_flag2],#16
- jz kbtest8
+; 에코 커맨드(EE!)를 날려서 키보드가 연결되었는지 체크한다.
+ test byte ptr [par2_flag2],#16 ; FLAG2_NOKBD
+ jz kbtest8 ; NOKBD가 꺼져있으면 cf=1 리턴
 # 2828 "second.S"
  cli ; added 5/17/2006
  mov al,#0xee ; echo command
  out #0x60,al
 wait_kbd_ctrl_ready:
- in al,#0x64
- and al,#0x01
+ in al,#0x64 ; 읽기:상태레지스터, 쓰기:커맨드레지스터
+ and al,#0x01 ; output 레지스터에 데이터가 있는지 체크한다.
  jz wait_kbd_ctrl_ready ; read status port while it is not ready
- in al,#0x60
+ in al,#0x60 ; 포트가 준비되면 읽는다.
  sti ; added 5/17/2006
- xor al,#0xee ; XOR clears the carry
- jne kbtest9
+ xor al,#0xee ; XOR clears the carry ; 에코 커맨드가 정상적으로 돌아오면 0이 된다. 
+ jne kbtest9 ; xor에서 캐리 플래그는 초기화된다. 에코가 안오면 cf=0인채 리턴
   ; if we got the same byte, the keyboard is attached
 
 
@@ -2252,7 +2252,7 @@ wait_kbd_ctrl_ready:
 
 
 kbtest8:
- stc ; flag keyboard present
+ stc ; flag keyboard present ; 에코가 오면 cf=1 (키보드 정상)
 kbtest9:
  pop ax
  ret
@@ -3257,7 +3257,7 @@ bvt0:
  pop es ; restore ES
 
 ; ****** 22.5.8
- mov di,#Keytable+256+mt_serial_no ; 키테이블 크기는 256, 뒤에 Menutable 스트럭쳐로 추측한다.
+ mov di,#Keytable+256+mt_serial_no ; 키테이블 크기는 256, 뒤에 Menutable 구조체가 있다.
  mov cx,#MAX_BIOS_DEVICES_asm ; = 16
  xor eax,eax
  repe	 ; mt_serial_no부터 0이 아닌값을 찾는다.
@@ -3270,7 +3270,7 @@ bvt0:
  xor cx,cx ; start at hard drive 0 (0x80)
  mov di,#vtab ; place to put IDs ; volume table
 bvt1:
- call read_vol_id ; get VolumeID in EAX
+ call read_vol_id ; get VolumeID in EAX ; MBR을 읽어서 eax에 volumeID를 리턴한다.
  stosd ; store in table ; 읽어온 볼륨ID를 vtab에 저장한다.
  or eax,eax ; test for zero
  jz bvt9 ; end, or no volume ID ; 볼륨ID가 없으면 끝나거나 레이드 비교
@@ -3278,66 +3278,66 @@ bvt1:
 ; now see if there will be a translation
  push di ; 연산하기 위해 값을 보존
  push cx
-
+; vtab에 저장한 값이 eax에 읽어들인 volumeID와 중복이면 0을 넣는다.
 ; ****** 22.5.9
  mov cx,di ; 4*table count to CX ; CX=device code , 첫번째는 cx=vtab+4
  mov di,#vtab 
  sub cx,di ; 4*count ; 저장된 vtab의 길이 - 첫vtab offset = 저장된 볼륨ID 길이
  shr cx,#2 ; table count ; 저장된 offset / 4 해서 갯수가 나온다.
  dec cx ; 갯수 - 1
- jz bvt1.5 ; table empty
- repne ; repeat while no match ; 읽어온 볼륨ID(eax)값을 
+ jz bvt1.5 ; table empty ; 처음이면 bvt1.5로 점프
+ repne ; repeat while no match ; MBR에서 읽어온 볼륨ID(eax)값과 vtab(di)값을 비교한다. 
    scasd
- jne bvt1.5
+ jne bvt1.5 ; 중단이 되었거나 끝까지 중복되는 값이 없으면 점프
 
  mov bx,#msg_dupl ; duplicate message
- call say
+ call say ; 에러메세지 출력
 
- call pause
+ call pause ; 딜레이
 
  pop cx
  pop di
 
- mov dword (di-4),#0 ; zero the duplicated volumeID
- jmp bvt9 ; skip to next on duplication
+ mov dword (di-4),#0 ; zero the duplicated volumeID ; 중복 volumid를 0으로
+ jmp bvt9 ; skip to next on duplication ; 다음 루프를 돈다.
 
 bvt1.5:
 ; ****** 22.5.9
- mov si,#Keytable+256+mt_serial_no
+ mov si,#Keytable+256+mt_serial_no ; 시리얼 넘버가 저장된 배열의 주소
  mov cx,#MAX_BIOS_DEVICES_asm
  mov di,si
 bvt2: jcxz bvt7
  repne ; repeat while not matching
    scasd
- jne bvt7 ; jump if no match
+ jne bvt7 ; jump if no match ; eax와 mt_serial_no 끝까지 같지않으면 bvt7
 # 153 "volume.S"
- lea dx,(di-4) ; DX is address of match
- sub dx,si ; DX is 4*index
- shr dx,#2 ; DX is input device #
- pop bx ; BX is real device #
+ lea dx,(di-4) ; DX is address of match ; 일치하는 주소값
+ sub dx,si ; DX is 4*index ; offset 구한다.
+ shr dx,#2 ; DX is input device # ; 나누기 4 = 몇번째인지
+ pop bx ; BX is real device # ; bx에 스택에 있는cx(하드디스크 숫자0-15)를 가져온다.
  push bx
- cmp bx,dx
+ cmp bx,dx ; bx는 루프를 돌고있는 하드디스크 번호, dx는 일치하는 하드디스크 번호다. 일치하면 볼륨테이블을 만들지 않는다.
 ; ****** 22.5.9
 ;;; je bvt2 ; equal means no translation
  je bvt7 ; equal means no translation
 ; ****** 22.5.9
- mov dh,bl ;
- or dx,#0x8080 ; make into HD bios codes
+ mov dh,bl ; dx에 물리적 논리적 테이블을 몰아넣는다.
+ or dx,#0x8080 ; make into HD bios codes ; 하드디스크는 0x80부터 시작
 # 173 "volume.S"
  push si
  mov bx,#devmap ; scan the device translation table
 bvt4:
- mov si,(bx) ; get from(low):to(high) pair
+ mov si,(bx) ; get from(low):to(high) pair 
  inc bx
  inc bx ; bump pointer by 2
  cmp si,dx ; duplicate?
- je bvt5
+ je bvt5 ; 일치하는 값이 있으면 넘어간다.
 
- or si,si ; not duplicate; at end?
- jnz bvt4
+ or si,si ; not duplicate; at end? ; devmap의 끝은 0. 0이 아니면 bvt4로 루프
+ jnz bvt4 ; 끝부분 까지 증가시킨다.
 
- mov (bx-2),dx ; put at end of table
- mov (bx),si ; and mark new end
+ mov (bx-2),dx ; put at end of table ; 물리,논리값
+ mov (bx),si ; and mark new end ; 0
 bvt5:
  pop si
 ; ****** 22.5.9
@@ -3472,7 +3472,7 @@ map_device:
  push si ; save working registers
  push ax ; 쓰이는 레지스터들 보존
  push bx
- mov si,#devmap ; point at translation table ; BSS의 [128] 36바이트 공간
+ mov si,#devmap ; point at translation table ; devmap==BSS의 [128] 36바이트 공간
  mov bl,dl
  and bl,#DEV_MASK_asm ; from device code in BL ; 0x80+16 -1 = 143(0x8F) 10001111
 
@@ -3480,20 +3480,20 @@ map_device:
  seg cs
  mov ah,[init_dx] ; get boot device code ; ah=부팅될때 하드 값 bl=저장된 하드값
  test dl,#0x10
- jnz bios_tt_match ; it is RAID, go use the boot device code 부트 디바이스의 다섯번째 비트가 켜져 있으면 점프
+ jnz bios_tt_match ; it is RAID, go use the boot device code ; 레이드 비트가 켜져 있으면 점프
 ; ***** 22.5.6
 ! bios translation table next
 bios_tt_next:
- seg cs ; DS may be bad ; devmap에서 순차적으로 값을 읽어와 비교한다. (디바이스 값과 같거나 0이면 끝)
+ seg cs ; DS may be bad ; devmap에서 순차적으로 값을 읽어와 비교한다.
    lodsw ; get from/to pair
  or ax,ax ; end of list?
- jz bios_tt_done
+ jz bios_tt_done ; 0이면 종료한다.
  cmp al,bl
  jne bios_tt_next
-; got a match
+; got a match ; 값이 일치하면 
 bios_tt_match:
- and dl,#0xFF-DEV_MASK_asm ; save flags =0x70 중간에 세비트를 
- or dl,ah ; put on the TO device code ; 저장된 디바이스 코드의 0x10비트가 켜져있으면 bios_tt_match 로 점프해서 keytable의 디바이스(하드) 값의 5-7비트를 부팅된 디바이스 값에 or한다.
+ and dl,#0xFF-DEV_MASK_asm ; save flags =0x70 ==01110000 
+ or dl,ah ; put on the TO device code ; 5-7비트값 보존
 bios_tt_done:
  pop bx
  pop ax

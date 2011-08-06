@@ -4,7 +4,6 @@ continue:
     call serial_setup ; 시리얼포트 세팅후 LI 출력 (first에서 한것)
 drkbd:
     키보드 버퍼를 비운다.
-    (32번 반복하는건 키보드 원형 큐 버퍼의 바이트수 때문인지 불확실함)
 comcom:
     display를 호출해 LILO의 세번째 글자 L을 출력 
     (display는 시리얼 포트에 출력하는 serdisp를 호출하고 al의 문자를 화면에 출력한다.)
@@ -20,4 +19,6 @@ restrt1:
     문자열(LILO, MAGE), 스테이지(2),버전(23.2) 비교
 	부팅된 하드와 저장된 하드가 다르면 devmap 변환 테이블에 추가한다.
 ldsc:
+	first와 second의 map이 생성시간 비교
+	call kt_read ; 키보드 테이블 로드
 
