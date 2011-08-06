@@ -195,14 +195,14 @@ start: cld ; only CLD in the code; there is no STD
 
 
  shl ax,#6 	; convert to paragraphs ; ax의 KB 단위를 세그먼트 단위로 바꾼다.
- sub ax,#Dataend/16 ; ax=640-EBDA-second길이. 최대한 끝에 코드를 옮기기 위한 세그먼트 세팅 
+ sub ax,#Dataend/16 ; ax=640-EBDA-second길이. EBDA 를 제외한 메모리 끝에 복사준비.
  mov es,ax ; destination address
- push cs ; 0x880
- pop ds  ; 0x880
+ push cs ; first의 (0x7c00+스택크기(2048)+first+로딩용섹터) /16 = 0x880 =second 시작부분
+ pop ds  ; ds=0x880
  xor si,si
  xor di,di
- xor ax,ax 			; 코드를 복제하기 위해 레지스터들을 세팅한다.
- mov cx,#max_secondary/2 ; count of words to move ; 워드 단위로 옮기기 위해 cx=코드(max_secondary)길이/2 
+ xor ax,ax 			; 코드를 복제하기 위해 레지스터 초기화
+ mov cx,#max_secondary/2 ; count of words to move ; 워드 단위로 옮기기 위해 cx=second길이(max_secondary)/2 
  rep
    movsw			; 코드/데이터영역 복사 (_main ~ max_secondary) 
  add di,#BSSstart-max_secondary	; 코드끝에서 BSSstart사이는 넘어간다. (7섹터)
@@ -214,10 +214,10 @@ start: cld ; only CLD in the code; there is no STD
  retf ; branch to continue address ; 복제코드로 점프
 continue:
 # 231 "second.S"
- call serial_setup ; set up the COM port, if any ; COM 포트를 초기화한다.
+ call serial_setup ; set up the COM port, if any ; COM 포트를 세팅하고 LI 문자열을 출력한다.
 
 
-! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터의 32bytes의 원형 키보드 큐 버퍼가 있다. 하지만 2씩 증가(scan,ascii)하기 때문에 2루프를 비워주는걸로 보인다.
+! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터의 32bytes의 원형 키보드 큐 버퍼가 있다. 하지만 2씩 증가(scan,ascii)하기 때문에 여유있게 2루프를 비워주는걸로 보인다.
  mov cx,#32 ; drain type-ahead buffer ? 
 drkbd: mov ah,#1 ; is a key pressed ? ; drain keyboard?
  int 0x16
@@ -228,14 +228,14 @@ drkbd: mov ah,#1 ; is a key pressed ? ; drain keyboard?
 
 
 comcom:
-
+; 섹터크기가 9이하면 섹터수를 18로 패치
  mov al,#0x4c ; display an 'L'
  call display	; LILO의 3번째 문자 L을 출력한다.
  push #0 ; get pointer to disk parameter table in DS:SI
  pop ds
  lds si,[0x78] ; 0x78 = 4*0x1E ; 인터럽트 0x1e(Disk Initialization Parameter) 주소를 DS:SI에 가져온다.
 
- cmp byte ptr (si+4),#9 ; okay ? 3.5 720k, 5.25 360k 이하는 SPT가 9 이하다. 9를 넘는다면 dskok
+ cmp byte ptr (si+4),#9 ; okay ? 3.5 720k, 5.25 360k 이하는 SPT(Sector per track)가 9 이하다. 9를 넘는다면 dskok
  ja dskok ; yes -> do not patch
 ! SPT가 9 이하라면 복사후 SPT를 18로 바꾸고 lilo의 disk parameter를 사용한다.
  push cs ; get pointer to new area in ES:DI
@@ -266,7 +266,7 @@ dskok:
 ;;; jmp restrt ; get going
 
 ! Restart here after a boot error
-
+! 세그먼트,메모리,스택 세팅하고 문자열 및 버전을 확인한다.
 restrt: mov bx,cs ; adjust segment registers
  mov ds,bx
  mov es,bx	; ds=es=cs
@@ -274,7 +274,7 @@ restrt: mov bx,cs ; adjust segment registers
  sub bx,#63*0x20+0x20 ; segment for setup code & MAX_SETUPSECS=커널에서 SETUP의 최대 크기(63); cs - 0x800 = 2048 (바이트 단위로 32k) 
       ; bootsect
  mov cx,#INITSEG ; 0x9000
- cmp bx,cx ; bx=second세그먼트-0x800
+ cmp bx,cx ; bx=second세그먼트-0x800 ; 32k 여유공간이 있는지 체크
  jbe restrt1 ; bx는 0xA000(640kb)-second크기-EBDA-32kb다. 이 값이 0x9000(576kb)이하라면 이 값을 그대로 쓰고 0x9000보다 크다면 [initseg]=0x9000 (second+EBDA+32kb < 64kb 면 0x9000)
  mov bx,cx ; BX is the smaller segment 
 restrt1:
@@ -286,26 +286,26 @@ restrt1:
  sub cx,bx ; subtract [initseg]	; cs-initseg 세그먼트와 오프셋을 분리한다.
  shl cx,#4 ; get stack size	; 스택의 크기(bytes) = offset
  mov ss,bx ; must lock with move to SP below ; INITSEG (0x9000)
- mov sp,cx ; data on the stack)	; 스택은 second 코드 바로 아래에 있다.
+ mov sp,cx ; data on the stack)	; 스택은 initseg 아래 위치한다.
 # 392 "second.S"
  cmp dword [sig],#0x4f4c494c ; "LILO" ; 첫부분 문자열 확인. (sig=="LILO")
  jne crshbrn2	; crshbrn로 가서 signature not found 출력후 대기-무한루프
  cmp dword [mcmdbeg+6],#0x4547414d ; "MAGE" from BOOT_IMAGE	; 끝부분 BOOT_IMAGE 문자열에서 MAGE
  jne crshbrn2	
- cmp BYTE [stage],#2
+ cmp BYTE [stage],#2	; 스테이지 확인
 
  jne crshbrn
  cmp WORD [version],#256*2 +23	; 버전 확인
-! 문자열과 버전이 맞지 않으면 에러 출력후 종료
-crshbrn2: jne crshbrn
+
+crshbrn2: jne crshbrn ; 문자열이나 버전등이 맞지 않으면 에러출력후 종료
  mov [cmdbeg],#acmdbeg ; probably unattended boot ; acmdbeg="auto "
 
  mov di,#devmap ; place to store the device map ; BSSstart + 128
 
- mov ah,[init_dx] ; AH is physical device ; 저장한 dx(dl) 값 (드라이브값??)
+ mov ah,[init_dx] ; AH is physical device ; 저장한 드라이브 값 dx(dl) 
 
- seg fs		; 0x07c0
- mov al,[par1_secondary+0+SSDIFF] ; map device logical ; SSDIFF=0 d_dev,d_flag 여기서는 d_dev = 0x80
+ seg fs		; 0x07c0 ; first 데이터는 fs 사용
+ mov al,[par1_secondary+0+SSDIFF] ; map device logical ; SSDIFF=0 first의 d_dev = 0x80?
 
 
 
@@ -319,19 +319,19 @@ crshbrn2: jne crshbrn
 
 
 
-! 부팅된하드와 d_dev값이 다르면 [BSSstart+128]에 AX를 넣어주고 같으면 0을 넣어준다.
+! 부팅된하드와 first의 d_dev값이 다르면 devmap에 AX를 추가한다. (변환 테이블) 끝을 0으로 초기화
  stosw ; set up the translation from map -> boot
 end_tt:
  xor ax,ax
  stosw
-
+! ldsc: 키보드 테이블 로드, 볼륨테이블 생성, DFL, 디스크립터 로드. 키보드 체크
 ldsc:
 ! load descriptor
  seg fs
- mov eax,[par1_mapstamp]	; map file이 만들어진 시간
+ mov eax,[par1_mapstamp]	; map file이 만들어진 시간(first)
 
  cmp eax,[par2_mapstamp]
- jne timeerr	; 타임스탬프가 다르면 에러 출력하고 hlt,무한루프
+ jne timeerr	; first와 second의 mapstamp가 다르면 timestamp mismatch 출력후 무한루프
 
  call kt_read ; read the Keytable
 
@@ -2543,7 +2543,7 @@ BAUD_BASE = 115200 ; divisor == 1
 divisor:
  .byte BAUD_BASE / 19200 ; must be same as bsect.c table
  .byte BAUD_BASE / 38400
- .byte BAUD_BASE / 57600
+ .byte BAUD_BASE / 57600 
  .byte BAUD_BASE / 115200
  .byte BAUD_BASE / 2400
  .byte BAUD_BASE / 2400
@@ -2557,11 +2557,11 @@ divisor:
 serial_setup:
 
 ;; seg fs
- mov dx,par2_port ; use a COM port ?	; par2_port와 par2_ser_param를 가져온다.
+ mov dx,par2_port ; use a COM port ? ; BOOT_PARAM2 구조체의 par2_port와 par2_ser_param를 가져온다. sparam: ?
    ; watch out, loads par2_ser_param
 ;;
  dec dl
- js nocom ; no -> go on		; 감소시켰을때 MSB가 켜져있다면 리턴
+ js nocom ; no -> go on		; 1 감소시켰을때 MSB(최상위비트)가 켜져있다면 리턴
  xor ax,ax ; initialize the serial port
  xchg al,dh	; al = par2_ser_param, dh = 0
 
@@ -2570,46 +2570,46 @@ serial_setup:
 
 ;;; or al,#0x06 ; stop bits = 2, nbits = 7 or 8
     ; this OR is not needed yet (21.7)
- int 0x14 ; Communications Port INIT ; ah=0 serial port 초기화, DX=RS232 카드 넘버
+ int 0x14 ; Communications Port INIT ; ah=0 serial port 초기화, al=파라미터 비트(par2_ser_param, DX=0기반 시리얼포트 번호 COM1-4(0-3) = par2_port
 
  push #0x40
- pop ds	; ds = 0x40
+ pop ds	; ds = 0x40	; BDA(BIOS data area)
 
  pop bx ; was DX
 
- shl bx,#1
- mov dx,(bx) ; get the port address from the BIOS
+ shl bx,#1	; *2
+ mov dx,(bx) ; get the port address from the BIOS	; dx=COM?의 port address
 
  seg cs ; keep it
- mov slbase,dx
+ mov slbase,dx	; slbase=COM port
 
- pop bx ; special baud rate test -- was AX
+ pop bx ; special baud rate test -- was AX ; par2_ser_param
 
- test bl,#0x04 ; stop bits == 2?
+ test bl,#0x04 ; stop bits == 2? ; 2번 비트(stop bit)가 0이면 1 stop bit, 1이면 2 stop bits
  cli ; do not disturb any code below
- jz stdbps ; standard BPS
+ jz stdbps ; standard BPS ; stop bit가 1이면 bps를 조절하지 않는다.
 
- shr bx,#5 ; index divisor array
+ shr bx,#5 ; index divisor array ; 상위 3비트만 남긴다. (baud rate)
  seg cs
- mov bl,divisor(bx)
+ mov bl,divisor(bx) ; 배열에서 divisor를 얻는다.
 
 spcbps: ; CLI: do not disturb ...
  push dx ; save base address
- add dx,#3 ; enable divisor latch access
+ add dx,#3 ; enable divisor latch access ; line control register
  in al,dx
- or al,#0x80
+ or al,#0x80 ; baud rate divisor = on
  out dx,al
  pop dx ; set new divisor
  push dx
- xchg ax,bx
+ xchg ax,bx ; al=divisor, bx=LCR포트값
  out dx,al
- inc dx
- mov al,ah
+ inc dx ; Modem control register
+ mov al,ah ; 0?
  out dx,al
  inc dx ; disable divisor latch access
- inc dx
+ inc dx ; Modem status register
  xchg ax,bx
- and al,#0x7f
+ and al,#0x7f ; LCR포트의 값에 baud rate divisor bit를 끈다.(원상복귀)
  out dx,al
  pop dx ; restore base address
 
@@ -2622,14 +2622,14 @@ stdbps: ; CLI: redundant if fell in from above
 
  mov al,#3 ; turn on DTR and RTS
 
- out dx,al
+ out dx,al ; MCR의 0,1비트를 켠다. activate DTR, RTS
  pop dx
  sti ; done
 
  mov cx,#32 ; drain the queue (if any)
 drain: in al,dx
- loop drain
- add dx,#5 ; clear the status register
+ loop drain ; 버퍼를 비운다.
+ add dx,#5 ; clear the status register ; line status register
  in al,dx
 
     ; send "\r\nLI" to the serial port
@@ -2638,7 +2638,7 @@ drain: in al,dx
  mov cx,#4
 ser1: seg cs
  lodsb
- call serdisp
+ call serdisp ; cr, lf, "LI" 출력(first에서 한것)
  loop ser1
 
 nocom:

@@ -305,7 +305,7 @@ use_boot:
 
 
  push #SETUP_STACKSIZE/16 + BOOTSEG + 512/16*2 ! 세그먼트로 계산 0x80 + 0x7c0 + 0x40 = 0x88
- pop es
+ pop es	; (0x7c00 + stack(2048) + first sector + 로딩용 섹터)/16 = 0x880
 
 
 

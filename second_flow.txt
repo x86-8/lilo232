@@ -1,0 +1,23 @@
+start:
+    EBDA를 뺀 메모리 끝부분(0xA000-EBDA-second크기)에 자기복제후 점프
+continue:
+    call serial_setup ; 시리얼포트 세팅후 LI 출력 (first에서 한것)
+drkbd:
+    키보드 버퍼를 비운다.
+    (32번 반복하는건 키보드 원형 큐 버퍼의 바이트수 때문인지 불확실함)
+comcom:
+    display를 호출해 LILO의 세번째 글자 L을 출력 
+    (display는 시리얼 포트에 출력하는 serdisp를 호출하고 al의 문자를 화면에 출력한다.)
+    섹터크기가 9이하라면 sector수를 18로 patch 하고 lilo의 disk parameter(0x1e)를 등록한다.
+dskok:
+    call instto ; timeout 핸들러설치 (int 0x1c=tick루틴)
+    tick은 카운터를 감소시키지 않는값(0xffff)이 아니면 타이머 인터럽트가 발생할때마다 cntdown--을 하고 이전 루틴을 호출한다. if(cntdown==0) timeout=0xff
+restrt:
+	세그먼트 세팅 및 계산
+    second와 0x9000 사이에 32kb 공간이 있으면 initseg=0x9000 아니면 initseg=cs-32kb
+restrt1:
+    스택을 initseg 아래로 세팅한다.
+    문자열(LILO, MAGE), 스테이지(2),버전(23.2) 비교
+	부팅된 하드와 저장된 하드가 다르면 devmap 변환 테이블에 추가한다.
+ldsc:
+
