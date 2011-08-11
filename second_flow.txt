@@ -20,5 +20,14 @@ restrt1:
 	부팅된 하드와 저장된 하드가 다르면 devmap 변환 테이블에 추가한다.
 ldsc:
 	first와 second의 map이 생성시간 비교
-	call kt_read ; 키보드 테이블 로드
-
+	call kt_read ; Keytable로 키보드 테이블을 읽어들인다.
+	call build_vol_tab ; 볼륨 테이블 생성 devmap에 logical:physical로 이루어진 테이블 생성.vtab, rtab에는 연결된 하드의 raid_offset이 들어가고 rmask는 해당 하드가 레이드인지 비트로 표시한다.
+	crc 체크한다.	
+	call vmtest ; vmware가 동작중인지 테스트
+vir_loop:
+	vmware가 실행중이면 VMDISABLE인 디스크립터를 지운다. (뒤쪽 디스크립터들을 한칸씩 당겨쓴다.)
+virtual_done:
+	call kbtest ; 키보드가 연결되었는지 확인한다.
+	키보드가 연결되지 않았으면 NOKBDISABLE이 켜있는 디스크립터를 지운다.
+kbd_done:
+	first의 플래그와 menutable의 플래그 OR

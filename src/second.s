@@ -217,7 +217,7 @@ continue:
  call serial_setup ; set up the COM port, if any ; COM 포트를 세팅하고 LI 문자열을 출력한다.
 
 
-! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터의 32bytes의 원형 키보드 큐 버퍼가 있다. 하지만 2씩 증가(scan,ascii)하기 때문에 여유있게 2루프를 비워주는걸로 보인다.
+! drkbd(drain keyboard?)는 키보드 버퍼를 비운다(max:32) BIOS영역에는 41aH, 41cH를 포인터로 하는 보통 41eH부터 32바이트 원형 키보드 큐가 있지만 2바이트씩 증가하기 때문에 max 15회로 추측한다. 여유있게 비워주는걸로 보인다.
  mov cx,#32 ; drain type-ahead buffer ? 
 drkbd: mov ah,#1 ; is a key pressed ? ; drain keyboard?
  int 0x16
@@ -319,7 +319,7 @@ crshbrn2: jne crshbrn ; 문자열이나 버전등이 맞지 않으면 에러출�
 
 
 
-! 부팅된하드와 first의 d_dev값이 다르면 devmap에 AX를 추가한다. (변환 테이블) 끝을 0으로 초기화
+! 부팅된하드와 first의 d_dev값이 다르면 devmap에 AX를 추가한다. devmap 마지막=0
  stosw ; set up the translation from map -> boot
 end_tt:
  xor ax,ax
@@ -348,18 +348,18 @@ descr_more:
  call cread ; 섹터 읽는다.
  jc near fdnok ; error -> retry ; 에러나면 ldsc로 점프
  add bh,#2 ; increment address ; 저장할 다음 어드레스 (+0x200==512)
- cmp si,#Keytable+256+mt_descr+sa_size*MAX_DESCR_SECS_asm ; 오프셋이 최대 디스크립터 오프셋보다 작으면 루프
- jb descr_more ; 디스크립터를 다 읽어들인다.
+ cmp si,#Keytable+256+mt_descr+sa_size*MAX_DESCR_SECS_asm ; 아직 다 안읽었다면
+ jb descr_more ; 더 읽어들인다.
 
- mov si,#Descr ; compute a checksum of the descriptor table
- mov di,#512*3 -4
+ mov si,#Descr ; compute a checksum of the descriptor table ; es:si는 crc 체크할 번지
+ mov di,#512*3 -4 ; di는 크기
 
  push dword #0x04c11db7 ; crc 32비트에서 많이 쓰이는 키값
  call crc32
- add di,si
- cmp eax,dword (di)
+ add di,si 
+ cmp eax,dword (di) ; eax에 crc값이 리턴되면 저장된 값과 비교
  jz nochkerr
-! chkerr로 가야할것 같다. 
+! 이 부분은 chkerr로 가거나 timeerr과 chkerr 레이블을 바꿔줘야 할것 같다. 이대로면 time error메세지를 출력한다.
 
 ! Timestamp error
 timeerr:
@@ -383,20 +383,20 @@ nochkerr:
 ; remove those items that have "vmdisable", if virtual boot
  call vmtest ; vmware가 동작중인지 테스트
  jnc virtual_done ; vmware가 안돌면 virtual_done으로 점프
- mov di,#DESCR0 ; point at first descriptor ; 디스크립터(커널 이름,패스워드, 램디스크사이즈,vga_mode 등 ) 정보 메모리 주소
+ mov di,#DESCR0 ; point at first descriptor ; 디스크립터(커널 이름,패스워드, 램디스크사이즈,vga_mode 등 ) 정보 메모리 주소. 디스크립터의 구조는 common.h의 IMAGE_DESCR 구조체에 정의되어 있다
 vir_loop:
- test byte ptr [id_name](di),#0xFF ; test for NUL name ; 끝이면 virtual_done으로 간다.
+ test byte ptr [id_name](di),#0xFF ; test for NUL name ; 디스크립터의 끝이면 다음 루틴으로
  jz virtual_done
  test word ptr [id_flags](di),#512 ; FLAG_VMDISABLE가 꺼져있으면 스킵
  jz vir_skip
-
+; FLAG_VMDISABLE이 켜있으면 한칸씩 당겨 덮어쓴다.
  push di
  lea si,[id_size](di) ; 디스크립터 구조체 한개의 크기 [di+id_size]
 vir_loop1:
  mov cx,#id_size
  rep
     movsb ; FLAG_DISABLE이 켜있으면 넘기고 덮어씌운다.
- test byte ptr [id_name](di),#0xFF
+ test byte ptr [id_name](di),#0xFF ; 끝까지 복사
  jnz vir_loop1
 
  pop di
@@ -410,15 +410,15 @@ virtual_done:
 
 
 ; remove those items that have "nokbdisable", if nokeyboard boot
- call kbtest
- jc kbd_done ; 정상이면 kbd_done로 점프
+ call kbtest ; 키보드가 연결되었는지 테스트
+ jc kbd_done ; 정상이면 다음루틴으로 점프
  mov di,#DESCR0 ; point at first descriptor
 kbd_loop:
  test byte ptr [id_name](di),#0xFF ; test for NUL name
  jz kbd_done
- test word ptr [id_flags](di),#0x8000 ; #FLAG_NOKBDISABLE ; NOKBDISABLE이 꺼져있으면 스킵. 플래그가 켜진것만 남기고 덮어쓴다.
+ test word ptr [id_flags](di),#0x8000 ; #FLAG_NOKBDISABLE ; NOKBDISABLE이 꺼져있으면 스킵.
  jz kbd_skip
-
+; NOKBDISABLE이 켜 있다면 해당 디스크립터는 덮어써서 지운다.
  push di
  lea si,[id_size](di)
 kbd_loop1:
@@ -438,10 +438,10 @@ kbd_skip:
 kbd_done:
 # 560 "second.S"
  mov bx,#Keytable+256 ; Menutable
- mov al,(bx+mt_flag) ; 플래그를 가져온다. FLAG_NOBD등
+ mov al,(bx+mt_flag) ; 플래그를 가져온다. FLAG_NOBD 등 (bios data collection)
 
  seg fs ; get possible 16
- or byte ptr [par1_prompt+SSDIFF],al
+ or byte ptr [par1_prompt+SSDIFF],al ; first의 d_flag ; NOBD flag??
 
 
 
@@ -1985,9 +1985,9 @@ notzro:
  iret ; continue with old interrupt
 
 kt_set:
-;; keyboard table set?? 키보드 테이블의 섹터주소(5byte)
+;; keyboard table set?? 키보드 테이블의 섹터주소(5byte) 를 가져온다.
 ;; seg fs ; load the keyboard translation table
- mov cx,par2_keytab ;MSG_OFF+SSDIFF+7 ; SSDIFF=0 ; kt_cx
+ mov cx,par2_keytab ;MSG_OFF+SSDIFF+7 ; SSDIFF=0 ; second 처음의 kt_cx
 ;; seg fs
  mov dx,par2_keytab+2 ;MSG_OFF+SSDIFF+9 ; kt_dx
 ;; seg fs
@@ -2113,8 +2113,8 @@ cwr_flags: .byte 0 ; saved flags
 
 
 kt_read: ; Keytable read
- call kt_set ; set for Keytable i/o ; kt_dx,kt_cx,kt_al의 키보드 테이블 섹터주소 읽고 bx엔 Keytable의 오프셋을 넣는다.
- call cread  ; 키테이블 섹터를 읽어들인다.
+ call kt_set ; set for Keytable i/o ; 키보드 테이블 섹터주소 세팅하고 bx엔 Keytable 메모리 주소를 넣는다.
+ call cread  ; keytable 섹터를 읽어들인다.
  jc keyerr
  mov si,#Keytable ; compute a checksum of the keytable
  mov di,#512 - 8 ; skip the last 4+4 bytes
@@ -2134,40 +2134,40 @@ nokeyerr:
 ! Sector read
 ! enter with AL, CX, DX, ES, BX set for read
 ! trashes CX and DI
-! BX=keytable오프셋, AL=섹터갯수, ...
+!
 cread: ; entry point for mapped device r/w
- call map_device ; DL (logical) -> DL (physical) ???????
+ call map_device ; DL (logical) -> DL (physical) ; VolumeID기반으로 하드 번호를 매핑(변경)한다. 
 
 cread_physical: ; same entry, device is not mapped
 
         test dl,#0x40|0x20	; 0x40=LINEAR, 0x20=LBA32
-        jnz use_linear
-! LINEAR, LBA32 가 꺼져있으면 chs방식으로 읽는다.
+        jnz use_linear	; LBA or LINEAR가 켜져있으면 분기
+! LINEAR, LBA32 둘다 꺼져있으면 CHS 방식으로 읽는다.
         push ax ;save the count
 		mov ah,#2 ;read command
-        call dsk_do_rw ; int 0x13 with retries
+        call dsk_do_rw ; int 0x13 with retries ; 5번 시도
         pop cx ;Carry Set means error on read
         mov al,cl ;count in AL, error code in AH
         ret
 
 use_linear:
-        mov ah,hinib ;will be zero for LINEAR
-        xchg al,dh ;AX is possible address ; dh는 헤더
+        mov ah,hinib ;will be zero for LINEAR ; hinib==선형섹터주소의 24-31 bits. LINEAR라면 계속 0이다.
+        xchg al,dh ;AX is possible address ; AX에 선형주소의 상위 16비트를 넣는다. hinib(31-24):dh(23-16). LBA32&LINEAR는 al:dh가 상위16비트. 하위16비트는 CX
 		test dl,#0x20 ;test for LBA32/LINEAR *****
-		jz lnread ;pure LINEAR ***** ; lba32가 아니면 lnread로 점프
+		jz lnread ;pure LINEAR ***** ; lba32나 linear 둘중 하나만 켜있으면 lnread
         test dl,#0x40
-        jz lnread		; linear가 아니면 lnread로 점프
-        mov ah,dh ;former count is really hi-nibble ; 둘다 켜지면
+        jz lnread
+        mov ah,dh	;former count is really hi-nibble ; linear, lba 둘다 켜지면 count에 1을 넣고 기존 al값을 상위8비트로 쓴다.
         mov hinib,ah
         mov dh,#1 ;set count to 1
 lnread:
-        xchg di,ax ;hi-address to DI ; lnread = linear read?
+        xchg di,ax ;hi-address to DI ; lnread = linear read? ; di:cx=섹터 주소
         mov al,dh ;count to AL
 
  test dl,#0x10 ; ******
  jz ln_do_read ; ******
-! 레이드 비트가 켜지면 추가변환한다.
- call translate ; in volume.S
+! 레이드 비트가 켜지면 섹터주소 변환(+raid_offset)
+ call translate ; in volume.S 
 
 ln_do_read:
         call lba_read
@@ -2183,7 +2183,7 @@ vmtest:
  pushad ; save all extended registers
  smsw ax ; msw를 읽어들인다.
  rcr al,1 ; PE bit in AL to Carry
- jc vm_ret ; exit if virtual mode ; PE비트가 켜져있으면 리턴
+ jc vm_ret ; exit if virtual mode ; 보호모드에서 실행중이면 리턴 cf=1
 
 
 
@@ -2200,19 +2200,19 @@ vmtest:
  jz vm_ret ; TEST clears the carry, always
 ;
 ; VMware(R) test for virtual mode
-;
- mov eax,#0x564D5868 ; EAX: in = 'VMXh' out = version
+; vmware backdoor io port(0x5658)으로 vmware에서 실행중인지 확인하는 코드
+ mov eax,#0x564D5868 ; EAX: in = 'VMXh' out = version ; io port에서 읽어들이기 전에 eax에 매직넘버를 넣어줘야한다.
  xor ebx,ebx ; EBX: out = 'VMXh' under vmware
  mov edi,eax
  mov dx,#0x5658 ; DX: in = 'VX'
- mov ecx,#10 ; ECX: in = VMXGetVersion
- in eax,dx	; 5658 포트에서 4바이트를 읽는다.
- cmp ebx,edi ; test for vmware ; 0x5658 포트에서 읽어들이면 ebx에 0x564d5868 값이 들어간다.
+ mov ecx,#10 ; ECX: in = VMXGetVersion ; ECX에는 명령어가 온다. 10은 getversion
+ in eax,dx	; 레지스터를 세팅후 0x5658 포트를 읽으면 eax,ebx,ecx의 값이 변한다.
+ cmp ebx,edi ; test for vmware ; vmware라면 ebx=0x564d5868 (vmware 매직넘버)
  clc ; NOT vmware if Carry==0 ; 도중에 분기할때를 위한 리턴값 cf=0
  jne vm_ret ; not vmware ; vmware가 없다면 cf=0
 
  inc eax ; carry is not affected by INC
- jz vm_ret ; invalid version number == 0xFFFFFFFF
+ jz vm_ret ; invalid version number == 0xFFFFFFFF ; eax에는 버전정보가 리턴된다. 잘못된 버전이면 cf=0인채 리턴
 
 vm_vir:
  stc ; signal virtual mode ; vmware가 있으면 cf=1
@@ -2261,18 +2261,18 @@ kbtest9:
 
 
 ; crc32 -- calculate CRC-32 checksum
-;
+; shift연산으로 CRC32를 빠르게 구하는 루틴이다.
 ; call:
-; push dword #POLYNOMIAL
-;
-; ES:SI char string pointer
-; DI count of characters
+; push dword #POLYNOMIAL ; 나누기 위한 다항식(젯수:divisor)
+; 많이 쓰는 다항식으로는 0x8005 (CRC16) 0x04C11DB7(CRC32)등이 있다.
+; ES:SI char string pointer ; es:si=데이터주소
+; DI count of characters ; di=크기
 ;
 ; call crc32
 ;
 ; CRC-32 is returned in EAX or DX:AX
 ; the arguments are popped from the stack
-;
+; crc32 표준 값인 다항식=0x04C11DB7, 초기값=0xFFFFFFFF, 최종XOR=0xFFFFFFFF(==not) 을 사용하고 있다.
 crc32:
   push bp
   mov bp,sp
@@ -2283,24 +2283,24 @@ crc32:
   push cx
 
   xor eax,eax ; initialize CRC
-  dec eax ; EAX = 0xFFFFFFFF
+  dec eax ; EAX = 0xFFFFFFFF ; shift register의 초기값
   inc di
 crc32a:
   dec di
-  jz crc32d
-  mov cx,#8 ; count 8 bits
+  jz crc32d ; 데이터가 더 없으면 종료
+  mov cx,#8 ; count 8 bits ; 바이트 단위로 계산한다.
   seg es
-  mov bl,(si) ; get next character
-  inc si
-crc32b: shl bx,#1 ; get hi bit of char in BH
-  shl eax,#1 ; shift hi bit out of CRC
-  adc bh,#0 ; add carry to BH
-  shr bh,#1 ; put bit in carry
+  mov bl,(si) ; get next character ; 1byte 비트열을 가져온다.
+  inc si 
+crc32b: shl bx,#1 ; get hi bit of char in BH ; 데이터의 1bit 
+  shl eax,#1 ; shift hi bit out of CRC ; shift register의 최상위비트(MSB)
+  adc bh,#0 ; add carry to BH ; 위의 두 비트를 xor한다.
+  shr bh,#1 ; put bit in carry 
   jnc crc32c ; skip the xor
-  xor eax,(bp+4) ; xor in the polynomial
+  xor eax,(bp+4) ; xor in the polynomial ; 두 비트의 xor이 1이면 키값을 xor
 crc32c:
-  loop crc32b ; loop back for 8 bits
-  jmp crc32a
+  loop crc32b ; loop back for 8 bits ; 8비트짜리 작은 루프
+  jmp crc32a ; 다음 데이터 1byte
 
 crc32d:
   not eax ; finialize CRC
@@ -2964,7 +2964,7 @@ shs_J11:
 ; AH error status if CF=1
 ; DI trashed
 ;
-
+; count(al)만큼 읽어들인다. 문제가 있으면 CHS로 변환해 읽어들인다.
 lba_read: push si ;save some registers
 
                 push bx
@@ -2979,23 +2979,23 @@ lba_read: push si ;save some registers
 
   and dl,#DEV_MASK_asm ;remove spurious flags (0x8F)
 
-  test dh,#0x20
-  jz no_lba ;linear will never use EDD calls
+  test dh,#0x20 
+  jz no_lba ;linear will never use EDD calls ; lba32가 꺼졌다면 no_lba로 가서 변환한다.
 
 
-         cmp al,#127 ;test for LINEAR transfer too big
+         cmp al,#127 ;test for LINEAR transfer too big ; 읽을 섹서 수가 0x7f이상이면 CHS로 변환
   ja no_lba ; for LBA mode (127 is max)
                 push ax
 
                 mov bx,#0x55AA ;magic number
                 mov ah,#0x41 ;function call
-                int 0x13
+                int 0x13 ; EDD 지원여부 테스트
 
                 pop ax
 
-                jc no_lba
+                jc no_lba ;  에러있으면 CHS로 변환
                 cmp bx,#0xAA55 ;magic return
-                jne no_lba
+                jne no_lba ; magic number가 이상해도 CHS
                 test cl,#01 ;packet calls supported?
                 jz no_lba
 
@@ -3013,17 +3013,17 @@ lba_avail:
 
                 push ds ;save DS
 
-  push dword #0 ; 0L is pushed
-                push di ;LBA hi word
+  push dword #0 ; 0L is pushed ; 섹터주소 주소
+                push di ;LBA hi word ; LBA 주소 di:cx
                 push cx ; lo word
                 push es ;ES:BX
-                push bx
+                push bx ; 읽어올 메모리 주소
 
-                push ax
+                push ax ; 읽을 섹터 갯수
 
 
 
-                push #16 ;size of parameter area ;#
+                push #16 ;size of parameter area ;# ; 패킷 사이즈
                            ;actually pushes a word
                 mov si,sp ;DS:SI is param block pointer
 
@@ -3031,7 +3031,7 @@ lba_avail:
                 pop ds ;DS:SI points at param block
 
 
-                mov ax,#0x4200 ;read function -- must be AX
+                mov ax,#0x4200 ;read function -- must be AX ; EDD 읽기 함수
      ; as AL has meaning on WRITE
                 call dsk_do_rw
 
@@ -3039,14 +3039,14 @@ lba_avail:
 
 
 
-                lea sp,word ptr (si+16) ;use lea so flags are not changed
+                lea sp,word ptr (si+16) ;use lea so flags are not changed ; EDD 패킷 반환
 
                 pop ds ;restore DS
 
-                jmp lba_read_exit1
+                jmp lba_read_exit1 ; 리턴
 
 
-
+; linear주소 -> CHS로 변환
 no_lba:
                 pop bx
                 pop cx
@@ -3164,16 +3164,16 @@ dsk_do_int13:
 dsk_do_int13a: pusha
                 int 0x13
                 jnc dsk_io_exit ; 에러가 안나면 리턴
-                dec bp ;does not affect the carry
-                jz dsk_io_exit ; 5번 실패하면 리턴
+                dec bp ;does not affect the carry ; 에러나면 카운트(5)를 감소
+                jz dsk_io_exit ; 5번 실패시 리턴 cf=1
                 xor ax,ax ;reset disk controllers
                 int 0x13
-                popa
+                popa	; 재시도시 레지스터들 복구. 카운트(bp)도 복구된다.
                 dec bp
                 jmp dsk_do_int13a
 
 dsk_io_exit: mov bp,sp ;do not touch any flags ; add명령을 쓰면 3줄을 한줄로 바꿀수 있지만 플래그를 건드리기 때문에 lea를 쓴다.
-                lea sp,(bp+16) ;an ADD would touch flags 
+                lea sp,(bp+16) ;an ADD would touch flags  ; 레지스터들을 복구시키지 않는다.상태코드 ah==0이면 노에러
                 pop bp ;do not touch any flags
                 ret
 
@@ -3219,7 +3219,7 @@ rmask: .word 0 ; physical raid mask
 ; Side effects: The volume ID table is built
 ; The from:to device translate table is filled in
 ;
-;
+; 볼륨테이블을 만든다. 볼륨테이블은 논리적번호:물리적번호를 가지며 논리번호는 리눅스에 lilo가 설치될때의 하드번호, 물리번호는 부팅되서 연결된 실제 하드번호를 가진다. volumeID로 매핑한다.
 build_vol_tab:
  pusha
 
@@ -3227,7 +3227,7 @@ build_vol_tab:
  xor dx,dx
  xchg [devmap],dx ; clear our First Stage mapping
 
- call is_prev_mapper ; is there a previous mapper ; 인터럽트 0x13이 매핑되었는지 확인한다.
+ call is_prev_mapper ; is there a previous mapper ; 체인로더로 인터럽트 0x13이 매핑되었는지 확인한다.
  jz bvt0 ; 매핑이 안되어있다면 점프
 
 ; have previous mapper active
@@ -3262,7 +3262,7 @@ bvt0:
  xor eax,eax
  repe	 ; mt_serial_no부터 0이 아닌값을 찾는다.
    scasd ; scan for any serial nos in table
- je bvt90 ; if none, skip reading vol_ids ; 메뉴테이블 값이 전부 0이면 bvt90으로 점프한다.
+ je bvt90 ; if none, skip reading vol_ids ; 메뉴테이블 값이 전부 0이면 bvt90(레이드 테이블 생성)으로 점프한다.
     ; as there will be no translations
 ; ****** 22.5.8
 
@@ -3289,7 +3289,7 @@ bvt1:
  repne ; repeat while no match ; MBR에서 읽어온 볼륨ID(eax)값과 vtab(di)값을 비교한다. 
    scasd
  jne bvt1.5 ; 중단이 되었거나 끝까지 중복되는 값이 없으면 점프
-
+;;; bvt1은 연결된 하드 볼륨을 읽어와서 vtab에 쓰고 연결된 하드에 중복값이 있으면 에러출력하는 루틴
  mov bx,#msg_dupl ; duplicate message
  call say ; 에러메세지 출력
 
@@ -3308,32 +3308,32 @@ bvt1.5:
  mov di,si
 bvt2: jcxz bvt7
  repne ; repeat while not matching
-   scasd
- jne bvt7 ; jump if no match ; eax와 mt_serial_no 끝까지 같지않으면 bvt7
+   scasd ; 논려volume과 물리volume과 일치하는 값을 찾는다.
+ jne bvt7 ; jump if no match ; 일치하는 값이 없다면 스킵
 # 153 "volume.S"
- lea dx,(di-4) ; DX is address of match ; 일치하는 주소값
- sub dx,si ; DX is 4*index ; offset 구한다.
- shr dx,#2 ; DX is input device # ; 나누기 4 = 몇번째인지
+ lea dx,(di-4) ; DX is address of match ; 일치하는 logical volumeID 위치
+ sub dx,si ; DX is 4*index 
+ shr dx,#2 ; DX is input device # ; 몇번째인지 구한다.
  pop bx ; BX is real device # ; bx에 스택에 있는cx(하드디스크 숫자0-15)를 가져온다.
  push bx
- cmp bx,dx ; bx는 루프를 돌고있는 하드디스크 번호, dx는 일치하는 하드디스크 번호다. 일치하면 볼륨테이블을 만들지 않는다.
+ cmp bx,dx ; bx는 물리 번호, dx는 논리 번호다. 둘이 일치하면(ex 01:01) 볼륨테이블에 쓰지 않는다.
 ; ****** 22.5.9
 ;;; je bvt2 ; equal means no translation
- je bvt7 ; equal means no translation
+ je bvt7 ; equal means no translation 
 ; ****** 22.5.9
  mov dh,bl ; dx에 물리적 논리적 테이블을 몰아넣는다.
- or dx,#0x8080 ; make into HD bios codes ; 하드디스크는 0x80부터 시작
+ or dx,#0x8080 ; make into HD bios codes ; 하드디스크를 표시하는 최상위비트를 켠다.
 # 173 "volume.S"
  push si
  mov bx,#devmap ; scan the device translation table
 bvt4:
- mov si,(bx) ; get from(low):to(high) pair 
+ mov si,(bx) ; get from(low):to(high) pair ; bx는 devmap의 포인터값
  inc bx
  inc bx ; bump pointer by 2
  cmp si,dx ; duplicate?
  je bvt5 ; 일치하는 값이 있으면 넘어간다.
-
- or si,si ; not duplicate; at end? ; devmap의 끝은 0. 0이 아니면 bvt4로 루프
+;;; bvt4는 from:to의 값을 devmap에 실제로 넣는 루틴이다.
+ or si,si ; not duplicate; at end? ; devmap의 끝(0)이 아니면 bvt4로 루프
  jnz bvt4 ; 끝부분 까지 증가시킨다.
 
  mov (bx-2),dx ; put at end of table ; 물리,논리값
@@ -3354,36 +3354,36 @@ bvt9:
 
 bvt90:
 ; now build the RAID offset table
-
+; MAX_BIOS_DEVICES만큼 루프를 돌면서 해당 하드가 레이드라면 물리하드 레이드비트(rmask)에 해당 비트를 켜고 연결된 하드 순서에 맞춰 rtab에 raid_offset 테이블을 만든다.
  mov si,#Keytable+256+mt_raid_offset
- mov dx,[Keytable+256+mt_raid_dev_mask]
- xor bx,bx ; count thru devices
+ mov dx,[Keytable+256+mt_raid_dev_mask] ; 16비트짜리 하드별 레이드 비트
+ xor bx,bx ; count thru devices ; n번째 * 4 의 오프셋
 bvt91:
  xor eax,eax ; may store 0
- shr dx,#1 ; is it raid? ; mt_raid_dev_mask의 비트로 n번째 하드가 레이드인지  확인한다. 아니면 bvt92로 점프한다. (1bit를 shift하면 바이트 크기를 줄일수 있다.)
- jnc bvt92 ; not a raid device ; 레이드가 아니면 리턴
+ shr dx,#1 ; is it raid? ; 이 하드가 레이드가 아니면 bvt92로 스킵한다. (1bit를 shift하면 바이트 크기가 절약된다.)
+ jnc bvt92 ; not a raid device 
 
  lodsd ; get raid offset
- push eax ; save value in stack
+ push eax ; save value in stack ; raid 오프셋을 읽어내 스택에 저장
 
- mov eax,[Keytable+256+mt_serial_no](bx) ; 2중루프로
- mov di,#vtab ; physical table address
- mov cx,#MAX_BIOS_DEVICES_asm
+ mov eax,[Keytable+256+mt_serial_no](bx)  ; 이 하드의 volumeID를 읽어온다.
+ mov di,#vtab ; physical table address ; vtab==볼륨테이블에서 물리 번호를 저장할 위치
+ mov cx,#MAX_BIOS_DEVICES_asm ; 16번
  repne
-   scasd ; scan for a match
- jne bvt_not_found ; the logical volume is not there
- lea di,(di-4-vtab) ; DI is 4*index into table ; 볼륨ID가 같으면 
+   scasd ; scan for a match ; eax는 인스톨러로 저장된 볼륨 vtab은 연결된 하드 볼륨
+ jne bvt_not_found ; the logical volume is not there ; 일치하는 볼륨이 없다면 스킵
+ lea di,(di-4-vtab) ; DI is 4*index into table ; di를 4로 나누면 일치하는 n번째 하드가 나온다.
  mov cx,di
- shr cx,#2 ; make 0..15
+ shr cx,#2 ; make 0..15 ; 일치하는 하드 번호
  mov ax,#1
- shl ax,cl ; mask bit in right position
+ shl ax,cl ; mask bit in right position ; n번 하드에 해당하는 rmask 비트를 켠다.
  or [rmask],ax
- pop dword ptr rtab(di) ; store RAID offset
+ pop dword ptr rtab(di) ; store RAID offset ; rtab에 raid_offset을 넣는다.
  jmp bvt92
 bvt_not_found:
  pop eax ; clean up the stack
 bvt92:
- add bx,#4 ; for(bx=0;bx<16*4;bx+=4)
+ add bx,#4 ; for(bx=0;bx<16*4;bx+=4) ; 오프셋을 4 증가
  cmp bx,#MAX_BIOS_DEVICES_asm*4
  jb bvt91
 # 294 "volume.S"
@@ -3472,28 +3472,28 @@ map_device:
  push si ; save working registers
  push ax ; 쓰이는 레지스터들 보존
  push bx
- mov si,#devmap ; point at translation table ; devmap==BSS의 [128] 36바이트 공간
+ mov si,#devmap ; point at translation table ; devmap은 BSS+[128]의 36바이트 공간이다.
  mov bl,dl
- and bl,#DEV_MASK_asm ; from device code in BL ; 0x80+16 -1 = 143(0x8F) 10001111
+ and bl,#DEV_MASK_asm ; from device code in BL ; 상태 비트(4-6)를 제외한다.
 
 ; ****** 22.5.6
  seg cs
- mov ah,[init_dx] ; get boot device code ; ah=부팅될때 하드 값 bl=저장된 하드값
+ mov ah,[init_dx] ; get boot device code ; ah=부팅된 하드 bl=읽어들일 하드
  test dl,#0x10
- jnz bios_tt_match ; it is RAID, go use the boot device code ; 레이드 비트가 켜져 있으면 점프
+ jnz bios_tt_match ; it is RAID, go use the boot device code ; 읽을 하드의 레이드 비트가 켜져 있으면 부팅된 하드번호를 넘긴다..
 ; ***** 22.5.6
 ! bios translation table next
 bios_tt_next:
  seg cs ; DS may be bad ; devmap에서 순차적으로 값을 읽어와 비교한다.
    lodsw ; get from/to pair
  or ax,ax ; end of list?
- jz bios_tt_done ; 0이면 종료한다.
+ jz bios_tt_done ; 끝(0)이면 종료한다.
  cmp al,bl
  jne bios_tt_next
-; got a match ; 값이 일치하면 
+; got a match ; logical 값이 일치하면 physical로 바꾼다.
 bios_tt_match:
  and dl,#0xFF-DEV_MASK_asm ; save flags =0x70 ==01110000 
- or dl,ah ; put on the TO device code ; 5-7비트값 보존
+ or dl,ah ; put on the TO device code ; 상태 비트(4-6) 보존
 bios_tt_done:
  pop bx
  pop ax
@@ -3512,7 +3512,7 @@ bios_tt_done:
 ; DI:CX updated if RAID translation takes place
 ; All other registers are unchanged
 ;
-;
+; raid 하드 섹터 주소 변환. rtab의 raid_offset만큼 섹터주소에 더해준다.
 translate:
  push bp
  mov bp,sp
@@ -3521,7 +3521,7 @@ translate:
  jnz trans_1
 
 ; this special cases the initial Keytable read, when no setup has been done
-
+; dl의 레이드 비트가 켜져야 넘어오기 때문에 볼륨테이블이  생성되기 전 키테이블을 읽어들일때를 위한 예외루틴. first에 저장된 raid_offset을 더한다.
  seg fs
  add cx,par1_raid_offset+SSDIFF ; ***** RAID ******
  seg fs
@@ -3534,15 +3534,15 @@ trans_1:
  push cx ; form dword (bp-4)
 
  mov di,dx ; DI gets full device code
- and di,#DEV_MASK_asm & 0x7F
+ and di,#DEV_MASK_asm & 0x7F ; 하위 4비트만 남는다.
 # 571 "volume.S"
- shl di,#2 ; index into array
+ shl di,#2 ; index into array ; n번째 하드*4 == 오프셋
 
  mov cx,[rtab](di) ; get low relocation value
  mov di,[rtab+2](di) ; get high relocation value
 # 590 "volume.S"
- add (bp-4),cx ; relocate
- adc (bp-4+2),di ; **
+ add (bp-4),cx ; relocate ; bp-4==cx(stack) 32비트 raid_offset을 더해준다.
+ adc (bp-4+2),di ; ** ; bp-2== di
 
  pop cx
  pop di
