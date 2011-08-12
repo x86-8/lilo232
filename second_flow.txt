@@ -1,33 +1,46 @@
 start:
-    EBDA를 뺀 메모리 끝부분(0xA000-EBDA-second크기)에 자기복제후 점프
+    EBDA를 뺀 메모리 끝부분(640k-EBDA-second)에 자기복제후 점프
+
 continue:
-    call serial_setup ; 시리얼포트 세팅후 LI 출력 (first에서 한것)
+    시리얼포트를 초기화하고 LI 출력 (first에서 한것) 시리얼 포트가 활성화됐으면 이제부터 serial port쪽에도 출력한다.
+
 drkbd:
     키보드 버퍼를 비운다.
+
 comcom:
-    display를 호출해 LILO의 세번째 글자 L을 출력 
-    (display는 시리얼 포트에 출력하는 serdisp를 호출하고 al의 문자를 화면에 출력한다.)
-    섹터크기가 9이하라면 sector수를 18로 patch 하고 lilo의 disk parameter(0x1e)를 등록한다.
+    LILO의 세번째 글자 L을 출력 
+    디스크 파라미터의 섹터수가 9이하라면 18로 patch 한다. (720K -> 1.44M?)
+
 dskok:
-    call instto ; timeout 핸들러설치 (int 0x1c=tick루틴)
-    tick은 카운터를 감소시키지 않는값(0xffff)이 아니면 타이머 인터럽트가 발생할때마다 cntdown--을 하고 이전 루틴을 호출한다. if(cntdown==0) timeout=0xff
+    timeout 핸들러설치
+
 restrt:
 	세그먼트 세팅 및 계산
     second와 0x9000 사이에 32kb 공간이 있으면 initseg=0x9000 아니면 initseg=cs-32kb
+
 restrt1:
     스택을 initseg 아래로 세팅한다.
     문자열(LILO, MAGE), 스테이지(2),버전(23.2) 비교
-	부팅된 하드와 저장된 하드가 다르면 devmap 변환 테이블에 추가한다.
+	부팅된 하드와 저장된 하드가 다르면 devmap에 추가한다.
+
 ldsc:
-	first와 second의 map이 생성시간 비교
-	call kt_read ; Keytable로 키보드 테이블을 읽어들인다.
-	call build_vol_tab ; 볼륨 테이블 생성 devmap에 logical:physical로 이루어진 테이블 생성.vtab, rtab에는 연결된 하드의 raid_offset이 들어가고 rmask는 해당 하드가 레이드인지 비트로 표시한다.
-	crc 체크한다.	
-	call vmtest ; vmware가 동작중인지 테스트
+	first와 second의 map 생성시간 비교
+	키보드 테이블을 읽는다. 여기엔 각종 정보가 담긴 Menutable을 포함된다.
+	
+	매핑용 볼륨 테이블을 만든다. 결과는 devmap,vtab,rtab등에 들어간다.
+	devmap는 logical:physical 형태로 이루어진다.
+	vtab, rtab에는 연결된 하드의 raid_offset이 들어가고 rmask는 해당 하드가 레이드인지 비트로 표시한다.
+
+	디스크립터 섹터수만큼 로드하고 crc32 체크한다.	
+
+	vmware가 동작중인지 체크한다.
+
 vir_loop:
-	vmware가 실행중이면 VMDISABLE인 디스크립터를 지운다. (뒤쪽 디스크립터들을 한칸씩 당겨쓴다.)
+	vmware면 VMDISABLE가 켜진 디스크립터를 지운다. (뒤쪽 디스크립터들을 한칸씩 당겨쓴다.)
+
 virtual_done:
 	call kbtest ; 키보드가 연결되었는지 확인한다.
-	키보드가 연결되지 않았으면 NOKBDISABLE이 켜있는 디스크립터를 지운다.
+	키보드가 연결되지 않았으면 NOKBDISABLE이 켜진 디스크립터 삭제
+
 kbd_done:
 	first의 플래그와 menutable의 플래그 OR
