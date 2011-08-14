@@ -446,23 +446,23 @@ kbd_done:
 
 
 
- mov bx,#Dflcmd
+ mov bx,#Dflcmd ; default command line 읽어올 메모리 주소
 ;
 ;seg fs
- mov cx,mt_dflcmd+Keytable+256 ;DFCMD_OFF
+ mov cx,mt_dflcmd+Keytable+256 ;DFCMD_OFF ; 디폴트 커맨드라인 섹터주소
 ;seg fs
  mov dx,mt_dflcmd+2+Keytable+256
 ;seg fs
  mov al,mt_dflcmd+4+Keytable+256
 ;
- call cread
- jc fdnok ; error -> retry
+ call cread ; dfl을 읽어들인다.
+ jc fdnok ; error -> retry ; 에러가 나면 다시 시작.
  mov bx,#Dflcmd
- cmp word ptr (bx),#0xf4f2 ; okay ?
+ cmp word ptr (bx),#0xf4f2 ; okay ? ; DC_MAGIC 이 오면 6b6d로 바꾸고 쓴다.
  jne bdcmag ; no -> do not write
 
- mov word ptr (bx),#0x6b6d ; erase the magic number
- call cmd_write ; write out the command line
+ mov word ptr (bx),#0x6b6d ; erase the magic number ; DC_MGOFF=="mk"
+ call cmd_write ; write out the command line ; 0x6b6d로 바뀐 내용을 dfl에 쓴다.
 # 598 "second.S"
  jmp dokay ; continue
 bdcmag: mov byte ptr (bx+2),#0 ; disable the command line
@@ -473,7 +473,7 @@ fdnok:
 
 
 
- br ldsc ; retry
+ br ldsc ; retry ; 키테이블부터 다시 읽어들인다.
 
 ! List all known boot images
 
@@ -514,15 +514,15 @@ atbol:
  br iloop ; done
 
 ! Ready to process user input
-
-dokay: mov bx,#ospc ; display 'O '
+! 입력받기전 세팅
+dokay: mov bx,#ospc ; display 'O ' ; LIL"O 23.2" 를 출력해줄듯? o+space?
  call say
 
  xor eax,eax
- mov dword ptr [hma],eax
+ mov dword ptr [hma],eax ; HMA=0
 
- mov ospc,al ; disable the message
- mov word ptr vgaovr,#0x8000 ; disable VGA override
+ mov ospc,al ; disable the message ; [ospc]=null 한번만 출력한다
+ mov word ptr vgaovr,#0x8000 ; disable VGA override ; #VGA_NOCOVR
 ;;
 ;; seg fs
  xchg ax,par2_delay ;DSC_OFF-8+SSDIFF
@@ -534,8 +534,8 @@ dokay: mov bx,#ospc ; display 'O '
 
  jc kbd_present
 ; no PC keyboard on the system, is there a serial port in use?
- cmp byte ptr [par2_port],#0
- jz skip_prompt ; no serial keyboard either
+ cmp byte ptr [par2_port],#0 ; 키보드가 연결안되어있고 시리얼포트도 사용하지 않으면 prompt를 skip한다.
+ jz skip_prompt ; no serial keyboard either ; 현재 머신에서 키보드가 없고 시리얼 연결도 없다면
 
 
 
@@ -543,23 +543,23 @@ kbd_present:
 
 
  seg fs ; enter boot prompt ?
- test byte ptr par1_prompt+SSDIFF,#1 ;DSC_OFF+15+SSDIFF,#0
+ test byte ptr par1_prompt+SSDIFF,#1 ;DSC_OFF+15+SSDIFF,#0 ; FLAG_PROMPT
 
- jnz extp ; yes -> check for external parameters
+ jnz extp ; yes -> check for external parameters ; FLAG_PROMPT가 꺼져있으면 prompt 스킵
 skip_prompt:
  mov nodfl,#bfirst ; boot first image if falling through
  call waitsh ; wait for a shifting key
- jc iloop ; key pressed -> enter interactive mode
+ jc iloop ; key pressed -> enter interactive mode 
 
 ! Check for external parameters
-
+! 익스터널 파라미터 관련값들을 체크한다. 값이 다르면 noex
 extp:
  seg fs ; external parameters ?
  cmp byte ptr SETUP_STACKSIZE-8+SSDIFF+6,#0xfe
 
  jne noex ; no -> go on
 
- seg fs
+ seg fs ; first를 참조한다. 0x7c0
  mov bl,SETUP_STACKSIZE-8+SSDIFF+7 ; get drive
  seg fs ; clear flag
  mov byte ptr SETUP_STACKSIZE-8+SSDIFF+6,bl ; clear flag
@@ -580,17 +580,17 @@ extp:
 
 ! No external parameters after timeout -> boot first image
 
-noex: push cs ; restore ES
+noex: push cs ; restore ES ; 0x9???
  pop es
  mov si,#Dflcmd+2 ; default command line ?
  cmp byte ptr (si),#0
  jne niloop ; yes -> use it
- mov ax,nodfl ; no idea how to tell as86 to do jmp (addr) :-(
+ mov ax,nodfl ; no idea how to tell as86 to do jmp (addr) :-( ; 스킵되면 bfirst 아니면 iloop로 가서 입력방는다.
  jmp ax ; fall through
 
 
 ; Command input processor
-
+; 입력 처리 부분 input loop
 iloop:
 
 
@@ -634,7 +634,7 @@ nomsg: push cs ; disable external parameters
 
  mov cmdbeg,#acmdbeg ; probably unattended boot
  mov si,#usrinpm ; interactive mode
-niloop: ; ES may point to external params
+niloop: ; ES may point to external params ; no input loop?
  mov bx,#msg_p ; display boot prompt
  call say
  mov bx,#cmdline ; move cursor to the end of the line
@@ -777,7 +777,7 @@ chkvga:
 
 
 vsktnbd:
- cmp dword ptr (si),#0x64626f6e ; "nobd"
+ cmp dword ptr (si),#0x64626f6e ; "nobd" ; 바이오스 데이터를 수집하지 않는다. (빠른 부팅)
  jne vsktv
  cmp byte (si+4),#32 ; terminated with SP or NUL?
  jnbe vsktv
@@ -882,50 +882,50 @@ brfrst:
  mov bx,#DESCR0 ; boot the first image
 
 
- xor ax,ax ; mask = 0
+ xor ax,ax ; mask = 0 
  call vmtest
  jnc brfrst0v ; not virtual
- mov ax,#2048
+ mov ax,#2048 ; FLAG_VMDEFAULT
 brfrst0v:
  call kbtest
  jc brfrst0k
- mov ax,#0x4000
+ mov ax,#0x4000 ; FLAG_NOKBDEFAULT
 brfrst0k:
 
  mov cx,#IMAGES
 brfrst1: test word ptr (bx+id_flags),ax
- jnz brfrst3
+ jnz brfrst3 ; 같은 플래그의 커널 이미지를 찾는다.
  add bx,#id_size
  loop brfrst1
 
  mov bx,#DESCR0 ; restore default
 brfrst3:
 # 1104 "second.S"
- mov si,bx ; copy the name to the command line
+ mov si,bx ; copy the name to the command line ; 찾은 디스크립터 위치(이름)을 복사
  mov di,#cmdline
-bfcpl: lodsb ; copy one character
+bfcpl: lodsb ; copy one character ; 디스크립터 이름 하나만 복사?
  mov (di),al
- inc di
+ inc di 
  or al,al ; NUL ?
  jnz bfcpl ; no -> next one
 
 ! Boot the image BX points to (with password check)
 
 boot:
- mov word par2_timeout,#0xffff ; kill timeout (22.7)
+ mov word par2_timeout,#0xffff ; kill timeout (22.7) ; 줄지 않는 timeout 값
  mov si,#cmdline ; locate start of options
-locopt: lodsb
+locopt: lodsb ; 공백 다음이 null이면 공백=null
  or al,al ; NUL ?
- je optfnd ; yes -> no options
+ je optfnd ; yes -> no options ; null 이면 optfnd
  cmp al,#32 ; space ?
- jne locopt ; no -> continue searching
- cmp byte ptr (si),#0 ; followed by NUL ?
- jne optfnd ; no -> go on
- mov byte ptr (si-1),#0 ; discard trailing space
+ jne locopt ; no -> continue searching ; 공백이 나올때까지 반복
+ cmp byte ptr (si),#0 ; followed by NUL ? ; 공백이면  이라인
+ jne optfnd ; no -> go on ; 공백다음이 null이 아니면 패스
+ mov byte ptr (si-1),#0 ; discard trailing space ; 공백 다음이 null이면 공백
 optfnd: dec si ; adjust pointer
  mov options,si ; store pointer for later use
 # 1141 "second.S"
- test word ptr [id_flags](bx),#1024
+ test word ptr [id_flags](bx),#1024 ; #FLAG_VMWARN
  jz boot9
  call vmtest ; 'vmwarn' there, is it actually virt. boot
  jnc boot9
@@ -959,13 +959,13 @@ vmwto:
 
 boot9:
 
- test byte ptr (bx+id_flags),#128 ; use a password
+ test byte ptr (bx+id_flags),#128 ; use a password FLAG_PASSWORD
  jz toboot ; no -> boot
- test byte ptr (bx+id_flags),#2 ; restricted ?
+ test byte ptr (bx+id_flags),#2 ; restricted ? FLAG_RESTR
  jz dopw ; no -> get the password
  cmp byte ptr (si),#0 ; are there any options ?
  jne dopw ; yes -> password required
-toboot: br doboot ; ...
+toboot: br doboot ; ...  
 dopw:
 
  push bx ; save the image descriptor
@@ -1084,23 +1084,23 @@ pwfail: mov bx,#msg_pf ; display an error message
 
 ! Boot the image BX points to
 
-doboot: mov byte ptr prechr,#61 ; switch to equal sign
+doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
  push bx ; save image descr
- mov bx,#msg_l ; say hi
+ mov bx,#msg_l ; say hi "Loading "
  call say
  pop bx ; display the image name
  push bx
- call say
+ call say ; 리눅스 이미지 이름 출력
  pop si
 
  push si
- add si,#id_start ; form address
+ add si,#id_start ; form address ; [si+id_start]==커널 이미지 섹터 주소
 
 ; Now load the kernel sectors
  xor ax,ax
  mov word ptr (gdt+0x1b),ax ; set GDT to "load low"
  mov byte ptr (gdt+0x1f),al
- mov moff,ax ; map is not loaded yet
+ mov moff,ax ; map is not loaded yet ; map offset ; 오프셋값 초기화
 
  lodsw ; address of the first map sector
  xchg cx,ax
@@ -1117,7 +1117,7 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign
 
 
  mov bx,[map] ; load the first map sector
- call sread
+ call sread ; 커널을 (일부 혹은 전체) 읽어온다.
 
 
 
@@ -1395,11 +1395,11 @@ loadopt:call loadit ; load the sector
  jmp launch ; go
 
 ! Load one sequence of sectors. Leave outer function at EOF.
-
+! 순차적으로 섹터들을 읽어들인다.
 load: push es ; save ES:BX
  push bx
 lfetch: mov si,moff ; get map offset
- mov bx,[map]
+ mov bx,[map] ; 커널 (아마도 인덱스) 로드한 주소
  mov cx,(bx+si) ; get address
  mov dx,(bx+si+2)
  mov al,(bx+si+4)
@@ -1692,15 +1692,15 @@ sread: push bx ; save registers
  push cx
  push dx
  call cread
- mov di,ax ; save AL return count
+ mov di,ax ; save AL return count ; 읽은 섹터수 저장
  jc rerror ; error -> complain
  pop dx ; restore registers
  pop cx
 rokay: pop bx
         shl ax,8 ; convert sectors to bytes
-        add ah,ah
+        add ah,ah ; 읽은 섹터를 바이트로 변환
  jc dowrap ; loaded an entire segment -> advance ES
- add bx,ax ; move BX
+ add bx,ax ; move BX ; 오프셋에 크기를 더한다.
  jnc nowrap ; same segment -> go on
 dowrap: mov ax,es ; move ES
  add ax,#0x1000
@@ -1794,7 +1794,7 @@ snext:
 ! Display a NUL-terminated string on the console
 ! bx에 문자열의 포인터를 받아 특수문자들을 처리해주고 null(0)값이 나올때까지 출력한다.
 say: mov al,(bx) ; get byte
- or al,al ; NUL ?
+ or al,al ; NUL ? 
  jnz say_loop ; not the end
  ret
 
@@ -1899,25 +1899,25 @@ noosht:
  ret ; done
 
 ! Shift wait loop (AX = timeout, returns CY set if interrupred)
-
+! 키가 눌려지거나 시리얼에 데이터가 있으면 CF=1
 waitsh: call setto ; set timeout
 actlp: mov ah,#2 ; get shift keys
  int 0x16
 
 
 
- and al,#0x5f ; anything set ? (except NumLock)
+ and al,#0x5f ; anything set ? (except NumLock) ; 01011111 ; numlock,insert제외
 
- jnz shpress ; yes -> return with CY set
+ jnz shpress ; yes -> return with CY set ; 상태키가 눌려(켜져)있으면 CF=1과 리턴
 ; 22.7.1 begin
  mov ah,#1 ; get status
  int 0x16
- jnz shpress ; key pressed
+ jnz shpress ; key pressed ; 키가 안눌러진 상태면 리턴
 ; 22.7.1 end
 
  mov dx,slbase ; using a serial port ?
  or dx,dx
- jz acnosp ; no -> go on
+ jz acnosp ; no -> go on ; 시리얼을 사용하지 않으면 루프 체크
  cmp byte ptr break,#0 ; break received ?
  jnz shpress ; yes -> return with CY set
  add dx,#5 ; check for pending break
@@ -4806,8 +4806,8 @@ cmdline:.byte 0
 
  .org *+4	; 데이터 저장? 4byte 정렬 때문에?
 theend:
-
-lkwbuf = cmdline+CL_LENGTH+2 ; this is a word
+; 커맨드라인 영역으로 1024bytes 할당?
+lkwbuf = cmdline+CL_LENGTH+2 ; this is a word ; CL_LENGTH=512
 lkcbuf = lkwbuf+2
 theend2 = lkcbuf+CL_LENGTH ; lkcbuf is 256
 
