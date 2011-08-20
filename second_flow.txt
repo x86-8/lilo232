@@ -44,3 +44,41 @@ virtual_done:
 
 kbd_done:
 	first의 플래그와 menutable의 플래그 OR
+	keytable에 저장된 섹터주소로 default command line를 읽어온다.
+	DFL의 매직넘버가 DC_MAGIC(0xf4f2)면 "mk"를 덮어쓰고 DFL 섹터를 디스크에 쓴다. DC_MAGIC이 아니면 cmd line(DFL+2)에 null을 넣어서 command line을 무효화한다.
+	에러가 나면 ldsc부터 다시 시작
+list:
+dokay:
+	"O 23.2 "를 한번만 출력한다.
+	[hma]=0 ; old_delay에 delay를 or해주고 delay=0
+	기본으로 분기할 곳(nodfl)에 iloop를 넣어둔다.
+kbd_present:
+	prompt 옵션이 켜져있는지 체크한다.
+skip_prompt:
+	키보드와 시리얼이 없거나 prompt 옵션이 꺼져있다면 마지막으로 키가 눌렸는지 체크한다(시리얼포함). lilo는 prompt 옵션을 꺼도 shift,alt,ctrl등 키를 누르면(시리얼은 break signal) prompt로 들어간다.
+	키가이 안눌렸다면 다음 분기점은 키입력 없이 bfirst가 된다.
+extp:
+	extp(external parameter)를 체크한다. 값이 있다면 niloop로 간다.
+noex:
+	extp을 사용하지 않을때의 값들을 세팅해준다.
+	es=cs
+	si의 Dflcmd+2가 null이 아니면 niloop로 간다.
+	아니면 미리 넣어둔 분기점(iloop,bfirst)으로 점프한다.
+iloop:
+	메모리 옮기기 실패시 에러메세지 출력후 restrt로 간다.	
+	message=옵션으로 메세지가 정의되었으면 디스크에서 메세지를 읽어온후 화면에 출력한다.
+	si= UI_MAGIC(0xff)
+niloop:
+	"boot: " 문자열 출력
+	bx=cmdline
+clend:
+	cmdline(코드부분 데이터끝)의 값을 null이 올때까지 출력한다.
+	prechr(BOOT_IMAGE다음)에 공백 " "을 넣는다.
+input:
+	실제 키입력부분. [si]가 UI_MAGIC(0xff)면 키 입력을 받아 처리하고 그 외 값이면 저장된 옵션을 처리한다.
+kbinp:
+	키입력을 받는다. timeout안에 키입력이 없으면 brto로 점프
+	키입력의 null은 무시한다. 저장된 cmdline에서는 null은 끝을 의미한다.
+gotinp:
+	특수키들을 먼저 처리한다. (null,bs,^u,tab등등)
+

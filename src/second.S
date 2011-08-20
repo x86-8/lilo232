@@ -4085,10 +4085,10 @@ slbase:	.word	0		; serial port base (or 0 if unused)
 break:	.byte	0		; break received flag
 #endif
 
-usrinpm:.byte	UI_MAGIC
+usrinpm: .byte	UI_MAGIC
 
 cmdbeg:	.word	0
-options:.word	0
+options: .word	0
 
 rdbeg:	.word	0,0		; RAM dist begin address (dword)
 

@@ -221,7 +221,7 @@ continue:
  mov cx,#32 ; drain type-ahead buffer ? 
 drkbd: mov ah,#1 ; is a key pressed ? ; drain keyboard?
  int 0x16
- jz comcom ; no -> done ; 키가 안눌렸으면 이 루프을 건너뛴다.
+ jz comcom ; no -> done ; jz==(zf=1) 키가 안눌렸으면 이 루프을 건너뛴다.
  xor ah,ah ; get the key ; 키가 눌렸다면 키값을 받아 키 버퍼를 비운다.
  int 0x16
  loop drkbd
@@ -324,7 +324,7 @@ crshbrn2: jne crshbrn ; 문자열이나 버전등이 맞지 않으면 에러출�
 end_tt:
  xor ax,ax
  stosw
-! ldsc: 키보드 테이블 로드, 볼륨테이블 생성, DFL, 디스크립터 로드. 키보드 체크
+! ldsc: 키보드 테이블 로드, 볼륨테이블 생성, Default command line, 디스크립터 로드. 키보드 체크
 ldsc:
 ! load descriptor
  seg fs ; first (0x7c0)
@@ -446,26 +446,26 @@ kbd_done:
 
 
 
- mov bx,#Dflcmd ; default command line 읽어올 메모리 주소
+ mov bx,#Dflcmd ; Default command line이 위치할 메모리 주소
 ;
 ;seg fs
- mov cx,mt_dflcmd+Keytable+256 ;DFCMD_OFF ; 디폴트 커맨드라인 섹터주소
+ mov cx,mt_dflcmd+Keytable+256 ;DFCMD_OFF ; 키테이블에 저장된 DFL의 섹터주소(sa_size)
 ;seg fs
  mov dx,mt_dflcmd+2+Keytable+256
 ;seg fs
  mov al,mt_dflcmd+4+Keytable+256
 ;
- call cread ; dfl을 읽어들인다.
- jc fdnok ; error -> retry ; 에러가 나면 다시 시작.
+ call cread ; DFL을 읽어들인다.
+ jc fdnok ; error -> retry ; 에러가 나면 키테이블부터 다시 읽어들인다.
  mov bx,#Dflcmd
- cmp word ptr (bx),#0xf4f2 ; okay ? ; DC_MAGIC 이 오면 6b6d로 바꾸고 쓴다.
+ cmp word ptr (bx),#0xf4f2 ; okay ?
  jne bdcmag ; no -> do not write
-
+; DC_MAGIC 이면 DC_MAGIC에 mk를 넣고 DFL 섹터에 저장한다.
  mov word ptr (bx),#0x6b6d ; erase the magic number ; DC_MGOFF=="mk"
  call cmd_write ; write out the command line ; 0x6b6d로 바뀐 내용을 dfl에 쓴다.
 # 598 "second.S"
  jmp dokay ; continue
-bdcmag: mov byte ptr (bx+2),#0 ; disable the command line
+bdcmag: mov byte ptr (bx+2),#0 ; disable the command line ; DC_MAGIC(0xf4f2)가 아니면 DFL 시작부분에 null을 채워서 DFL을 무효화 한다.
  jmp dokay ; go on
 fdnok:
 
@@ -476,7 +476,7 @@ fdnok:
  br ldsc ; retry ; 키테이블부터 다시 읽어들인다.
 
 ! List all known boot images
-
+! 커널 이미지들을 출력한다.
 list: mov byte ptr (bx),#0 ; set EOL marker
  call crlf
 
@@ -515,7 +515,7 @@ atbol:
 
 ! Ready to process user input
 ! 입력받기전 세팅
-dokay: mov bx,#ospc ; display 'O ' ; LIL"O 23.2" 를 출력해줄듯? o+space?
+dokay: mov bx,#ospc ; display 'O ' ; LIL까지 출력되었고 "O 23.2" 를 출력. o+space?
  call say
 
  xor eax,eax
@@ -525,120 +525,120 @@ dokay: mov bx,#ospc ; display 'O ' ; LIL"O 23.2" 를 출력해줄듯? o+space?
  mov word ptr vgaovr,#0x8000 ; disable VGA override ; #VGA_NOCOVR
 ;;
 ;; seg fs
- xchg ax,par2_delay ;DSC_OFF-8+SSDIFF
+ xchg ax,par2_delay ;DSC_OFF-8+SSDIFF ; old_delay=old_delay|delay ; delay=0
 ;;
  or old_del,ax ; remember delay
- mov nodfl,#iloop ; interactive prompt if falling through
+ mov nodfl,#iloop ; interactive prompt if falling through ; 다음 분기할 곳=폴링으로 입력받는 루틴(iloop)  기본으로 넣어둔다.
 
  call kbtest ; keyboard present?
 
  jc kbd_present
 ; no PC keyboard on the system, is there a serial port in use?
- cmp byte ptr [par2_port],#0 ; 키보드가 연결안되어있고 시리얼포트도 사용하지 않으면 prompt를 skip한다.
- jz skip_prompt ; no serial keyboard either ; 현재 머신에서 키보드가 없고 시리얼 연결도 없다면
+ cmp byte ptr [par2_port],#0 ; 키보드, 시리얼 연결이 없으면 첫번째 이미지로 부팅할 것이다.
+ jz skip_prompt ; no serial keyboard either
 
 
 
 kbd_present:
-
+; prompt 옵션이 켜있는지 체크한다.
 
  seg fs ; enter boot prompt ?
  test byte ptr par1_prompt+SSDIFF,#1 ;DSC_OFF+15+SSDIFF,#0 ; FLAG_PROMPT
 
- jnz extp ; yes -> check for external parameters ; FLAG_PROMPT가 꺼져있으면 prompt 스킵
-skip_prompt:
- mov nodfl,#bfirst ; boot first image if falling through
- call waitsh ; wait for a shifting key
+ jnz extp ; yes -> check for external parameters ; (first) FLAG_PROMPT가 켜있으면 extp로 넘어간다.
+skip_prompt: ; 이 곳은 키보드와 시리얼이 없거나 PROMPT 옵션이 꺼져 있을 때만 온다.
+ mov nodfl,#bfirst ; boot first image if falling through ; 다음 분기할 곳=첫번째 이미지로 부팅하는 곳 (bfirst)
+ call waitsh ; wait for a shifting key ; 키가 눌러졌거나 시리얼에서 break신호가 오면(cf=1) 바로 iloop로 간다.
  jc iloop ; key pressed -> enter interactive mode 
 
 ! Check for external parameters
-! 익스터널 파라미터 관련값들을 체크한다. 값이 다르면 noex
+! extp(external parameter)를 사용하면 extp의 command line 값을 es:bx에 넣고 non-interactive로 처리한다.
 extp:
  seg fs ; external parameters ?
- cmp byte ptr SETUP_STACKSIZE-8+SSDIFF+6,#0xfe
-
- jne noex ; no -> go on
-
+ cmp byte ptr SETUP_STACKSIZE-8+SSDIFF+6,#0xfe ; extp의 dl값. ext_dl 
+! first의 스택은 SETUP_STACKSIZE(2048)로 세팅되었다.
+ jne noex ; no -> go on ; external parameter를 사용하지 않으면 스킵
+! external parameter는 lilo가 first에서 넘겨받는 값이다. dx,bx,es,si 순으로 쌓는다. 역순으로 찾으려면 스택의 시작 0x7c00:2048-8 부터 ext_di,ext_es,bx, ext_dx
  seg fs ; first를 참조한다. 0x7c0
- mov bl,SETUP_STACKSIZE-8+SSDIFF+7 ; get drive
+ mov bl,SETUP_STACKSIZE-8+SSDIFF+7 ; get drive ; little-endian이라 dh가 온다. == drive  ; first에서 이미 dl에 드라이브 값이 들어갔다.
  seg fs ; clear flag
- mov byte ptr SETUP_STACKSIZE-8+SSDIFF+6,bl ; clear flag
+ mov byte ptr SETUP_STACKSIZE-8+SSDIFF+6,bl ; clear flag ; 매직넘버(dl==0xfe) 초기화
  seg fs ; load the signature pointer
- les bx,SETUP_STACKSIZE-8+SSDIFF
+ les bx,SETUP_STACKSIZE-8+SSDIFF ; LILO 문자열이 담긴 주소(ext_es:ext_di)를 가져온다.
 
  seg es
- cmp dword ptr (bx),#0x4f4c494c ; "LILO"
+ cmp dword ptr (bx),#0x4f4c494c ; "LILO" ; 문자열이 일치하지 않으면 extp를 쓰지 않는다.
  jne noex ; no -> go on
 
  seg fs
- mov si,SETUP_STACKSIZE-8+SSDIFF+4 ; pointer to the command line
+ mov si,SETUP_STACKSIZE-8+SSDIFF+4 ; pointer to the command line ; ext_bx는 커맨드라인(옵션) 주소
 
  seg es
  cmp byte ptr (si),#0 ; empty ?
  je iloop ; yes -> enter interactive mode
- jmp niloop ; enter non-interactive mode
+ jmp niloop ; enter non-interactive mode ; 커맨드라인에 값이 있으면 그 값을 처리한다.
 
 ! No external parameters after timeout -> boot first image
-
+! 입력 처리 전에 세팅해준다.
 noex: push cs ; restore ES ; 0x9???
  pop es
- mov si,#Dflcmd+2 ; default command line ?
+ mov si,#Dflcmd+2 ; default command line ? ; 매직넘버를 제외한 커맨드라인 주소
  cmp byte ptr (si),#0
- jne niloop ; yes -> use it
+ jne niloop ; yes -> use it ; 저장된 cmdline값이 있으면 우선 처리해준다. (끝이 0이면 끝. 0xff면 키입력을 받는다.)
  mov ax,nodfl ; no idea how to tell as86 to do jmp (addr) :-( ; 스킵되면 bfirst 아니면 iloop로 가서 입력방는다.
  jmp ax ; fall through
 
 
 ; Command input processor
-; 입력 처리 부분 input loop
+; polling 방식의 입력 처리 부분
 iloop:
 
 
 
 
-
+! message=file 옵션이 정의되었다면 메세지를 저장한다. 이 메세지를 읽어서 출력한다.
 ;;
 ;; seg fs ; message disabled ?
- cmp word ptr par2_msg_len,#0 ;MSG_OFF+SSDIFF,#0
+ cmp word ptr par2_msg_len,#0 ;MSG_OFF+SSDIFF,#0 ; 메세지가 있는지 체크
 ;;
- je nomsg ; yes -> skip this
- call crlf
-;
+ je nomsg ; yes -> skip this ; 메세지가 없으면 출력안함
+ call crlf ; 줄넘김
+; 메세지의 인덱스 섹터를 읽는다.
 ;seg fs ; load the message file
- mov cx,mt_msg+Keytable+256 ;MSG_OFF+SSDIFF+2
+ mov cx,mt_msg+Keytable+256 ;MSG_OFF+SSDIFF+2 ; initial greeing message
 ;seg fs
  mov dx,mt_msg+2+Keytable+256
 ;seg fs
  mov al,mt_msg+4+Keytable+256
 ;
- mov bx,[map]
- call sread
- call loadfile
+ mov bx,[map] ; map은 섹터 인덱스가 위치한다.
+ call sread ; 인덱스 섹터를 읽는다.
+ call loadfile ; map의 인덱스 섹터를 기반으로 여러번 읽는다. es!=0라 xread(상위메모리)가 아닌 sread로 읽는다.
 
  xor bx,bx ; set the terminating NUL and disable further
     ; messages
  xchg bx,par2_msg_len ;MSG_OFF+SSDIFF
 
  push #SYSSEG
- pop ds
+ pop ds ; ds=0x1000(SYSSEG)
  mov byte ptr (bx),#0
- xor bx,bx ; display the message
+ xor bx,bx ; display the message ; 읽어온 메세지를 출력
  call say
 
  push cs ; restore segment registers
  pop ds
 
-
+;es=ds=cs
 nomsg: push cs ; disable external parameters
  pop es
 
- mov cmdbeg,#acmdbeg ; probably unattended boot
- mov si,#usrinpm ; interactive mode
-niloop: ; ES may point to external params ; no input loop?
- mov bx,#msg_p ; display boot prompt
+ mov cmdbeg,#acmdbeg ; probably unattended boot ; "auto " 문자열 오프셋
+ mov si,#usrinpm ; interactive mode ; UI_MAGIC(0xff) si에 이 값이 있으면 input에서 바로 키입력을 받는다.
+niloop: ; ES may point to external params ; no input loop? ; si!=0로 넘어오면 키입력을 받지 않는다.
+ mov bx,#msg_p ; display boot prompt ; "boot: " 문자열 출력
  call say
  mov bx,#cmdline ; move cursor to the end of the line
-clend: mov al,(bx)
+clend: mov al,(bx) ; cmdline에 있는값을 null이 올때까지 출력
  or al,al ; at end ?
  jz cledne ; yes -> go on
  push bx ; display the character
@@ -646,16 +646,16 @@ clend: mov al,(bx)
  pop bx
  inc bx ; next one
  jne clend
-cledne: mov byte ptr prechr,#32 ; character before command line is a space
+cledne: mov byte ptr prechr,#32 ; character before command line is a space ; 나중에 출력하기 위해? "BOOT_IMAGE "
 
 ! Input loop
-
+! [si]가 UI_MAGIC(0xff)면 키입력을 받아 처리하고(kbinp) 그 외의 값이면 저장된 옵션을 처리(gotinp)한다.
 input: seg es ; interactive mode ?
  cmp byte ptr (si),#0xff
  je kbinp ; yes -> get keyboard input
  seg es ; get non-interactive input
  mov al,(si)
- inc si
+ inc si ; si를 증가시키면서 탐색
  jmp gotinp ; go on
 
 tolist:
@@ -666,35 +666,35 @@ tolist:
 
 kbinp:
  mov cx,#brto ; get a key
- call getkey
+ call getkey ; 키 입력을 받는다. timeout안에 키입력이 없으면 brto(cx)로 점프한다.
 # 812 "second.S"
-noNull: or al,al ; keyboard NUL input?
+noNull: or al,al ; keyboard NUL input? ; 저장된 cmdline의 null은 종료를 의미하기 때문에 키입력에서 받은 null은 무시한다.
  je input ; yes, skip Keyboard NUL
 ; stored command line NUL is handled differently
-
+! 받은 키입력(저장된 cmdline) 처리부분
 gotinp: cmp al,#9 ; TAB ?
- je tolist ; yes -> list images
+ je tolist ; yes -> list images ; second는 menu가 아닌 text라 기본으로 커널 이미지들을 보여주지는 않는것 같다. TAB이나 ?을 타이핑 해야 이미지들을 보여준다.
  cmp al,#63 ; "?" ?
  je tolist ; yes -> list images
  or al,al ; NUL ?
  je nul ; yes -> go on
- cmp al,#8 ; BS ?
- je todelch ; yes -> erase one character
- cmp al,#13 ; CR ?
+ cmp al,#8 ; BS ? ; 백스페이스는 bx를 지우고 화면(시리얼)출력도 한칸 지운다.
+ je todelch ; yes -> erase one character 
+ cmp al,#13 ; CR ? 
  je cr ; yes -> go on
  cmp al,#127 ; DEL ?
  je todelch ; yes -> erase one character
- ja input ; non-printable -> ignore it
- cmp al,#21 ; ^U ?
+ ja input ; non-printable -> ignore it ; 0x80이상은 출력불가
+ cmp al,#21 ; ^U ? ; C-u는 보통 한줄지움
  je todell ; yes -> erase the line
  cmp al,#24 ; ^X ?
  je todell ; yes -> erase the line
  cmp al,#32 ; ignore non-printable characters except space
- jb input
- ja noblnk ; no space -> go on
- cmp (bx-1),al ; second space in a row ?
+ jb input ; 32 미만의 제어문자들도 출력불가. 위에 있는것들 빼고는 무시한다.
+ ja noblnk ; no space -> go on ; 32이상 글자들 숫자,기호,알파벳
+ cmp (bx-1),al ; second space in a row ? ; 키입력이 공백이면 공백이 중복인지 체크한다.
  je input ; yes -> ignore it
-noblnk: cmp bx,#cmdline+CL_LENGTH-1 ; at end of buffer ?
+noblnk: cmp bx,#cmdline+CL_LENGTH-1 ; at end of buffer ? ; cmdline의 최대크기(끝)이면 무시
  je input ; yes -> ignore
  xor ah,ah ; cmdline is always NUL terminated
  mov (bx),ax ; store in the buffer
@@ -729,12 +729,12 @@ sknext: add di,#id_size ; test next entry
  loop sklp ; next one
  br input ; done -> get more input
 
-todelch:br delch ; ...
+todelch: br delch ; ...
 todell: br delline ; ...
 
 ! End of input, process the command line
-
-nul: push bx ; automatic boot - wait for timeout
+! cmdline이 null일때 처리하는 부분. 키입력(혹은 옵션처리)부분을 끝낸다. 키가 눌려져 있다면 iloop로 가서 세팅과 환명메세지부터 다시 시작한다.
+nul: push bx ; automatic boot - wait for timeout 
  mov ax,old_del
  call waitsh
  pop bx
@@ -771,7 +771,7 @@ cpsav: lodsb ; copy one byte
  jne notrspc ; no -> go on
  dec bx ; remove the space
  mov byte ptr (bx),al
-notrspc:mov si,#cmdline ; scan the command line for "vga=", "kbd=",
+notrspc: mov si,#cmdline ; scan the command line for "vga=", "kbd=",
  mov di,si ; "lock" or "mem="
 chkvga:
 
@@ -847,7 +847,7 @@ delch: cmp bx,#cmdline ; at the beginning ?
  call say
 # 1020 "second.S"
  pop bx
-toinput:br input ; go on
+toinput: br input ; go on
 
 ! Delete the entire line
 
@@ -1241,7 +1241,7 @@ cpdone:
  je vganorm ; no -> go on
  mov ax,vgaovr ; use that value
  jmp vgaset
-vganorm:test bx,#1
+vganorm: test bx,#1
  jz novga
 vgaset: seg es
   mov [506],ax ; magic offset in the boot sector
@@ -1370,9 +1370,9 @@ loadlow:
 launch2:
 
  jmp launch ; go !
-
+! loadfile은 [map]의 index를 기반으로 sread를 이용해 SYSSEG(0x1000):0에 파일을 모두 읽어들인다. 인덱스의 마지막 주소는 다음 인덱스 섹터 주소다.
 loadfile:
- push #SYSSEG ; load a file at SYSSEG:0000
+ push #SYSSEG ; load a file at SYSSEG:0000 ; 0x1000:0에 로드한다.
  pop es
  xor bx,bx
 lfile: call load
@@ -1391,43 +1391,43 @@ loadit: call load ; load it
 
 ! Load one sector. Start the system at EOF.
 
-loadopt:call loadit ; load the sector
+loadopt: call loadit ; load the sector
  jmp launch ; go
 
 ! Load one sequence of sectors. Leave outer function at EOF.
-! 순차적으로 섹터들을 읽어들인다.
+! [map]의 인덱스를 기반으로 sread를 이용해 순차적으로 섹터들을 읽어들인다.
 load: push es ; save ES:BX
  push bx
 lfetch: mov si,moff ; get map offset
- mov bx,[map] ; 커널 (아마도 인덱스) 로드한 주소
- mov cx,(bx+si) ; get address
+ mov bx,[map] ; map==읽어들인 섹터 인덱스의 메모리 주소
+ mov cx,(bx+si) ; get address [Map+moff]
  mov dx,(bx+si+2)
  mov al,(bx+si+4)
- or cx,cx ; at EOF ?
+ or cx,cx ; at EOF ? ; 섹터주소(혹은+실린더)가 0이 아니면 읽는다.
  jnz noteof ; no -> go on
- or dx,dx
+ or dx,dx ; 상,하위 섹터주소(혹은CHS)와 드라이브가 null이면 복구하고 리턴한다.
  jnz noteof
  pop bx ; restore ES:BX
  pop es
- pop ax ; pop return address
+ pop ax ; pop return address ; 디스크 읽기를 완전히 (한단계 더) 리턴한다.
  ret ; return to outer function
-noteof: add si,#sa_size ; increment pointer
+noteof: add si,#sa_size ; increment pointer ; cx,dx,al 5바이트 ; 다음 섹터 위치
  mov moff,si
  cmp si,#512 - sa_size + 1 ; page end ?
- jb near doload
-
+ jb near doload  ; 인덱스의 끝이 아니면 상위메모리 혹은 일반으로 읽어들인다.
+! 이 부분은 인덱스의 마지막 주소를 의미한다. 마지막 주소로 다음 인덱스의 주소를 읽는다.
  mov moff,#0 ; reset pointer
  push cs ; adjust ES
  pop es
 
-        mov bl,hinib ; this might get clobbered
-        push bx ; so save it
+ mov bl,hinib ; this might get clobbered ; cread 내부에서 값이 변경되기에  저장해둔다.
+ push bx ; so save it
  mov bx,[map] ; load map page
  call sread
         pop ax ; restore the hi-nibble
  mov hinib,al ;
 
- mov al,#0x2e ; print a dot
+ mov al,#0x2e ; print a dot ; 인덱스를 읽을때마다 '.' 을 출력한다.
  call display
  jmp lfetch ; try again
 
@@ -1630,7 +1630,7 @@ doload: pop bx ; restore ES:BX
 
 ! Load a sequence of sectors, possibly moving into "high memory" (> 1 MB)
 ! afterwards.
-
+! es가 0이면 상위메모리에 읽고 아니면 그냥 읽는다.
 xread: push ax ; ES == 0 ?
  mov ax,es
  or ax,ax
@@ -1642,11 +1642,11 @@ xread: push ax ; ES == 0 ?
  jmp sread
 
 rdhigh: push bx ; okay - DS:BX points to GDT in this case
- mov bx,#LOADSEG ; adjust ES:BX
+ mov bx,#LOADSEG ; adjust ES:BX ; 0x1000
  mov es,bx
  xor bx,bx
- call sread ; load the sector(s)
-        mov tempal,al
+ call sread ; load the sector(s) ; 일단 LOADSEG로 읽는다.
+        mov tempal,al ; al 보존
  pop bx ; get pointer to GDT
  push ax ; just in case ...
  push cx
@@ -1687,7 +1687,7 @@ badmov: pop bx ; discard GDT
  jmp reset ; (standard procedure calls say & bout)
 
 ! Load a sequence of sectors
-
+! 섹터수만큼 읽어들이고 읽은만큼 메모리 주소(es:bx)를 증가시킨다.
 sread: push bx ; save registers
  push cx
  push dx
@@ -1698,11 +1698,11 @@ sread: push bx ; save registers
  pop cx
 rokay: pop bx
         shl ax,8 ; convert sectors to bytes
-        add ah,ah ; 읽은 섹터를 바이트로 변환
- jc dowrap ; loaded an entire segment -> advance ES
+        add ah,ah ; 섹터수*(2^9). 읽은 섹터를 바이트로 변환한다. 
+ jc dowrap ; loaded an entire segment -> advance ES ; 섹터수의 최대값은 CHS는 128(세그먼트가 64kb), EDD는 127이기 때문에 넘치면 128로 생각해서 세그먼트만 더해준다. 하지만 cread에서처리할때 al은 상위 바이트값으로 쓰여서 EDD는 1섹터씩 읽는다.
  add bx,ax ; move BX ; 오프셋에 크기를 더한다.
  jnc nowrap ; same segment -> go on
-dowrap: mov ax,es ; move ES
+dowrap: mov ax,es ; move ES ; 넘친만큼 세그먼트에 더한다.
  add ax,#0x1000
  mov es,ax
 nowrap:
@@ -1714,7 +1714,7 @@ aret: ret ; done
 rerror:
  push ax
  mov bx,#msg_re ; say something
-reset: call say
+reset: call say ; 에러메세지와 에러코드 출력후 restrt부터 다시 시작한다.
  pop ax ; display the error code
  mov al,ah
  call bout
@@ -1730,7 +1730,7 @@ upcase: cmp al,#0x61 ; lower case character ? ('a')
  cmp al,#0x7a ; 'z'
  ja nolower
  sub al,#0x20 ; convert to upper case
-nolower:ret ; done
+nolower: ret ; done
 
 pause:
 
@@ -1800,7 +1800,7 @@ say: mov al,(bx) ; get byte
 
 
 ! Display CR/LF
-
+! 아랫줄 앞으로 가는 루틴
 crlf: mov al,#13 ; CR
  call display
  mov al,#10 ; LF
@@ -1826,110 +1826,110 @@ dispret:
 
 
 
-serdisp:push dx ; wait for space in the send buffer
+serdisp: push dx ; wait for space in the send buffer
  seg cs
- mov dx,slbase	; 3F8h, 2F8h등 base는 receiver buffer, transmitter holding register 다
+ mov dx,slbase	; 3F8h, 2F8h등 base는 receiver buffer/transmitter holding register
  or dx,dx
  jz serret	; slbase가 0이면 리턴한다.
  add dx,#5	; slbase + 5
  push ax
-serwait:in al,dx	; LSR(line status register)에서 1byte 읽어온다.
+serwait: in al,dx	; LSR(line status register)에서 1byte 읽어온다.
  test al,#0x10 ; break -> set break flag	; bit 4 = break interrupt
- jz nobrk	;	비트가 꺼져있으면 nobrk
+ jz nobrk	;	break 비트가 켜있다면 [break]=1
  seg cs
- mov byte ptr break,#1
+ mov byte ptr break,#1 ; break condition은 읽으면 리셋되기에 표시해둔다.
 nobrk: test al,#0x20 ; ready to send ?	; bit 5 = emptry transmitter holding register
- jz serwait ; no -> wait	; bit 5가 꺼져있으면 대기
- sub dx,#5 ; send the character	; bit5가 켜져있으면 비어있다. 송신버퍼에 출력한다.
+ jz serwait ; no -> wait	; 데이터를 보내도 될 때까지 대기
+ sub dx,#5 ; send the character	
  pop ax
- out dx,al
+ out dx,al ; 준비가 됐다면 시리얼로 출력한다.
 serret: pop dx ; done
  ret
 
 
 ! Get a key (CX = timeout exit)
-
+! timeout 시간까지 키입력과 시리얼 입력을 기다린다. 시간이 다되면 cx로 점프한다.
 getkey: ;;
 ;; seg fs ; set the timeout
  mov ax,par2_timeout ;DSC_OFF-10+SSDIFF
 ;;
- call setto
-gwtkey: mov ah,#1 ; is a key pressed ?
+ call setto ; timeout 설정
+gwtkey: mov ah,#1 ; is a key pressed ? ; 키가 눌렸으면 zf=0
  int 0x16
- jnz gotkey ; yes -> get it
-
+ jnz gotkey ; yes -> get it ; 입력된 키가 있으면 키를 받아 리턴한다.
+! 입력된 키가 없으면 시리얼 포트 확인
  mov dx,slbase ; using a serial port ?
  or dx,dx
  jz gnokey ; no -> wait
- add dx,#5 ; character ready ?
+ add dx,#5 ; character ready ? ; LSR register
  in al,dx
- test al,#1
- jz gnokey ; no -> wait
+ test al,#1 ; Receiver buffer register에 데이터가 있는가?
+ jz gnokey ; no -> wait ; 시리얼에도 없으면 gnokey
  sub dx,#5 ; get it
  in al,dx
- and al,#0x7f ; strip 8th bit
- jnz gotch ; ignore NULs
+ and al,#0x7f ; strip 8th bit ; 7번 비트는 0으로 예약
+ jnz gotch ; ignore NULs ; 시리얼에서 온 데이터는 키테일블로 변환하지 않는다. 입력받은 al 값으로 리턴
 
 gnokey:
-# 2417 "second.S"
+# 2417 "second.S" ; 들어온 키가 없으면 timeout 체크 0 or 0xff(timed out)
  test byte ptr timeout,#1 ; timed out ?
- jz gwtkey ; no -> wait
- pop ax ; discard return address
- jmp cx ; jump to timeout handler
+ jz gwtkey ; no -> wait ; 타임아웃이 안됐다. -> 다시 키입력 체크
+ pop ax ; discard return address ; 원래 call에서 리턴할 주소
+ jmp cx ; jump to timeout handler ; timeout시 cx로 점프
 gotkey: xor ah,ah ; read a key
  int 0x16
  push bx ; keyboard translation (preserve BX)
  mov bx,#Keytable
- xlatb
+ xlatb ; 받은 아스키 키값을 키테이블에서 변환한다.
  pop bx
 gotch:
 
 
  seg fs ; always enter prompt ?
- test byte ptr par1_prompt+SSDIFF,#1
+ test byte ptr par1_prompt+SSDIFF,#1 ; FLAG_PROMPT
 
  jz noosht ; yes -> do not disable timeout
 
-; disable timeout
- test byte ptr par2_flag2,#4
+; disable timeout ; 키 입력을 받으면 timeout을 해제할건지 체크한다.
+ test byte ptr par2_flag2,#4 ; FLAG2_UNATTENDED 이 옵션이 켜있다면 키입력시마다 timeout을 재설정한다.
  jnz nocancel
- mov word ptr par2_timeout,#0xffff
+ mov word ptr par2_timeout,#0xffff ; unattend 옵션이 꺼졌다면 한번 키를 입력하면 timeout은 없어진다.
 nocancel:
 noosht:
  ret ; done
 
 ! Shift wait loop (AX = timeout, returns CY set if interrupred)
-! 키가 눌려지거나 시리얼에 데이터가 있으면 CF=1
+! 상태키 혹은 일반키가 눌려지거나 시리얼에서 break 신호가 오면 CF=1을 리턴한다.
 waitsh: call setto ; set timeout
 actlp: mov ah,#2 ; get shift keys
  int 0x16
 
 
 
- and al,#0x5f ; anything set ? (except NumLock) ; 01011111 ; numlock,insert제외
+ and al,#0x5f ; anything set ? (except NumLock) ; 01011111 ; 키보드 상태비트에서 numlock,insert제외
 
- jnz shpress ; yes -> return with CY set ; 상태키가 눌려(켜져)있으면 CF=1과 리턴
+ jnz shpress ; yes -> return with CY set ; 상태키(alt,shift,ctrl...)가 눌려(켜져)있으면 CF=1과 리턴
 ; 22.7.1 begin
  mov ah,#1 ; get status
- int 0x16
- jnz shpress ; key pressed ; 키가 안눌러진 상태면 리턴
+ int 0x16 ; 키가 눌려졌으면 zf=0, jnz는 zf=0일때 분기한다.
+ jnz shpress ; key pressed ; 키가 눌려졌다면 cf=1과 리턴
 ; 22.7.1 end
 
  mov dx,slbase ; using a serial port ?
  or dx,dx
- jz acnosp ; no -> go on ; 시리얼을 사용하지 않으면 루프 체크
- cmp byte ptr break,#0 ; break received ?
+ jz acnosp ; no -> go on ; 시리얼을 사용하지 않으면 시리얼쪽 체크는 안한다.
+ cmp byte ptr break,#0 ; break received ? ; 이전에 break를 받았는가?
  jnz shpress ; yes -> return with CY set
- add dx,#5 ; check for pending break
+ add dx,#5 ; check for pending break ; LSR register
  in al,dx
- test al,#0x10
+ test al,#0x10 ; 현재 break condition을 체크한다.
  jnz shpress ; break received -> return with CY set
 
 acnosp: test byte ptr timeout,#1 ; timed out ?
  jz actlp ; no -> wait
  clc ; clear carry
  ret ; done
-shpress:stc ; set carry
+shpress: stc ; set carry
  ret ; done
 
 ! Timeout handling
@@ -1959,7 +1959,7 @@ remto: push es ; remove the interrupt handler ; 원래의 타이머 인터럽트
  ret
 
 ! AX = ticks, 0xffff = no timeout
-
+! ax를 타이머 countdown에 넣는다.
 setto: or ax,ax ; time out immediately ?
  jz toimmed ; yes -> do it
  cli ; set timeout value
@@ -1967,7 +1967,7 @@ setto: or ax,ax ; time out immediately ?
  mov byte ptr timeout,#0 ; clear timed-out flag
  sti ; done
  ret
-toimmed:mov byte ptr timeout,#0xff ; set the timed-out flag
+toimmed: mov byte ptr timeout,#0xff ; set the timed-out flag
  ret ; done
 
 tick: pushf ; save flags ; 대체되는 0x1c 타이머 인터럽트 루틴
@@ -2149,7 +2149,7 @@ cread_physical: ; same entry, device is not mapped
         pop cx ;Carry Set means error on read
         mov al,cl ;count in AL, error code in AH
         ret
-
+! LINEAR나 LBA 하나만 켜있다면 DI=(hinib<<8)|dh 둘다 켜있다면 DI=(al<<8)|dh 가 된다. EDD라면 읽을 섹터수는 1이고 al은 상위 주소로 쓰인다.
 use_linear:
         mov ah,hinib ;will be zero for LINEAR ; hinib==선형섹터주소의 24-31 bits. LINEAR라면 계속 0이다.
         xchg al,dh ;AX is possible address ; AX에 선형주소의 상위 16비트를 넣는다. hinib(31-24):dh(23-16). LBA32&LINEAR는 al:dh가 상위16비트. 하위16비트는 CX
@@ -2161,7 +2161,7 @@ use_linear:
         mov hinib,ah
         mov dh,#1 ;set count to 1
 lnread:
-        xchg di,ax ;hi-address to DI ; lnread = linear read? ; di:cx=섹터 주소
+        xchg di,ax ;hi-address to DI ; lnread = linear read? ; di,cx=섹터 주소
         mov al,dh ;count to AL
 
  test dl,#0x10 ; ******
@@ -2983,7 +2983,7 @@ lba_read: push si ;save some registers
   jz no_lba ;linear will never use EDD calls ; lba32가 꺼졌다면 no_lba로 가서 변환한다.
 
 
-         cmp al,#127 ;test for LINEAR transfer too big ; 읽을 섹서 수가 0x7f이상이면 CHS로 변환
+         cmp al,#127 ;test for LINEAR transfer too big ; 읽을 섹터 수가 0x7f이상이면 CHS로 변환
   ja no_lba ; for LBA mode (127 is max)
                 push ax
 
@@ -4311,7 +4311,7 @@ vgacmp: lodsb
  cmp al,#32 ; space ?
  je vgafnd ; yes -> found it
  jmp svgatb ; try next entry otherwise
-vgamore:cmp al,ah
+vgamore: cmp al,ah
  je vgacmp ; equal -> next character
 vgaskp: mov al,(bx) ; skip to end of reference string
  inc bx
@@ -4690,11 +4690,11 @@ msg_vmwarn:
  .ascii "Do you wish to continue? [y/n] "
  .byte 0
 # 3967 "second.S"
-msg_int:.byte 10
+msg_int: .byte 10
  .ascii "*Interrupted*"
  .byte 10,0
 
-msg_eof:.byte 10
+msg_eof: .byte 10
  .ascii "Unexpected EOF"
  .byte 10,0
 
@@ -4709,11 +4709,11 @@ msg_v: .byte 10
  .ascii "decimal number."
  .byte 10,0
 
-msg_pks:.byte 10
+msg_pks: .byte 10
  .ascii "Invalid hexadecimal number. - Ignoring remaining items."
  .byte 10,0
 
-msg_pkf:.byte 10
+msg_pkf: .byte 10
  .ascii "Keyboard buffer is full. - Ignoring remaining items."
  .byte 10,0
 
@@ -4759,15 +4759,15 @@ tempal: .byte 0
 moff: .word 0 ; map offset
 map: .word Map ; map to use ; 덤프결과 0x2800
 
-cntdown:.word 0 ; count-down
-timeout:.byte 0 ; timed out
+cntdown: .word 0 ; count-down
+timeout: .byte 0 ; timed out
 
 dolock: .byte 0
 
-int1c_l:.word 0 ; old timer interrupt
-int1c_h:.word 0
+int1c_l: .word 0 ; old timer interrupt
+int1c_h: .word 0
 
-old_del:.word 0 ; delay before booting
+old_del: .word 0 ; delay before booting
 
 nodfl: .word 0 ; action if no defaults are present
 
@@ -4776,10 +4776,10 @@ slbase: .word 0 ; serial port base (or 0 if unused)
 break: .byte 0 ; break received flag
 
 
-usrinpm:.byte 0xff
+usrinpm: .byte 0xff
 
 cmdbeg: .word 0
-options:.word 0
+options: .word 0
 
 rdbeg: .word 0,0 ; RAM dist begin address (dword)
 
@@ -4795,27 +4795,27 @@ memmap: .word 0,0,0,0,0,0,0,0,0,0
 dskprm: .word 0,0,0,0,0,0
 
  .even ; control alignment from here down
-acmdbeg:.ascii "auto "
-mcmdbeg:.ascii "BOOT_IMAGE"
+acmdbeg: .ascii "auto "
+mcmdbeg: .ascii "BOOT_IMAGE"
 prechr: .byte 32 ; space: guard double blank supression
     ; equal sign: variable assignment
-cmdline:.byte 0
+cmdline: .byte 0 ; Map을 사용하지 않을때는 Map의 공간을 cmdline으로 사용할 수 있다. 최소 512bytes(섹터크기)이상
 
 
 
 
- .org *+4	; 데이터 저장? 4byte 정렬 때문에?
+ .org *+4
 theend:
 ; 커맨드라인 영역으로 1024bytes 할당?
 lkwbuf = cmdline+CL_LENGTH+2 ; this is a word ; CL_LENGTH=512
 lkcbuf = lkwbuf+2
 theend2 = lkcbuf+CL_LENGTH ; lkcbuf is 256
 
-the_end1 = theend+511	! theend + 1섹터 (bytes)
-theends = the_end1/512	! theends = theend의 섹터크기
+the_end1 = theend+511	! theend + 1섹터 (bytes) ; 코드크기/섹터크기 결과값에 +1해준다.
+theends = the_end1/512	! theends = theend의 섹터크기 ; 코드끝까지 섹터수를 구한다.
  .org theends*512-4
  .long X
- .align 512		! 섹터단위 정렬
+ .align 512		! 섹터단위 정렬 ; max_secondary는 코드&데이터부분 다음 섹터에 위치한다.
 max_secondary:	
 # 4140 "second.S"	! max_seocndary = theend 다음 섹터
 Map = max_secondary + 512	! Map = max_secondary + 1 (sector)
