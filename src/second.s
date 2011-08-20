@@ -1098,11 +1098,11 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
 
 ; Now load the kernel sectors
  xor ax,ax
- mov word ptr (gdt+0x1b),ax ; set GDT to "load low"
+ mov word ptr (gdt+0x1b),ax ; set GDT to "load low" ; gdt 일부분 초기화
  mov byte ptr (gdt+0x1f),al
- mov moff,ax ; map is not loaded yet ; map offset ; 오프셋값 초기화
+ mov moff,ax ; map is not loaded yet ; map offset ; map에 쓰이는 오프셋값 초기화
 
- lodsw ; address of the first map sector
+ lodsw ; address of the first map sector  ; 커널 섹터 주소 세팅
  xchg cx,ax
  lodsw
  xchg dx,ax
@@ -1117,7 +1117,7 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
 
 
  mov bx,[map] ; load the first map sector
- call sread ; 커널을 (일부 혹은 전체) 읽어온다.
+ call sread ; 커널의 첫 맵섹터(인덱스)를 읽어온다.
 
 
 
@@ -1131,20 +1131,20 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
 ;seg fs
  mov al,mt_dflcmd+4+Keytable+256
 ;
- call cread
+ call cread ; DFLcmd를 다시 읽어온다.
  push word ptr (Dflcmd) ; push magic number
  mov bx,#Dflcmd ; load the fallback sector
- call load1
+ call load1 ; 폴백 섹터(1sector)를 읽어온다.
  pop ax ; valid magic number ?
 
- cmp ax,#0xf4f2
+ cmp ax,#0xf4f2 ; default command line 매직넘버
  je dclok ; yes -> can write
- cmp ax,#0x6b6d
+ cmp ax,#0x6b6d ; mk
  jne nofbck ; invalid -> must not write
-dclok: mov bx,#Dflcmd ; fallback data present ?
+dclok: mov bx,#Dflcmd ; fallback data present ? ; 6b6d면 bx=dflcmd
  cmp word ptr (bx),#0xf4f2
  jne nofbck ; no -> go on
- call cmd_write ; write out the command line
+ call cmd_write ; write out the command line ; 0xf4f2면 로드한 폴백을 dflcmd 섹터에 쓴다.
 nofbck:
 
 
@@ -1152,14 +1152,14 @@ nofbck:
 
 
  mov bx,#Dflcmd ; load the options sector
- call load1
+ call load1 ; [map]의 두번째 섹터(옵션섹터)를 읽는다.
  mov si,cmdbeg ; copy non-options part of command line
  mov di,#Parmline
- mov cx,#CL_LENGTH-1 ; max number of characters to copy
+ mov cx,#CL_LENGTH-1 ; max number of characters to copy ; cmdline의 최대값
 
 cpnocl:
 
- cmp si,#cmdline
+ cmp si,#cmdline ; parmline에 cmdbeg(auto... or BOOT_IMAGE....)부터 cmdline위치 까지 복사
 
 
 
@@ -1177,19 +1177,19 @@ cpnodn:
 cpdname:
  lodsb
  or al,al
- jz cpdname9
+ jz cpdname9 ; cmdline에서 끝(null)까지 parmline에 복사
  stosb
  dec cx
  jmp cpdname
 cpdname9:
 
- mov si,#Dflcmd ; constant options ?
+ mov si,#Dflcmd ; constant options ? ; Dflcmd에서 자료 처리를 위해 사전준비.
  cmp byte ptr (si),#0
  je nocopt ; no -> go on
- mov al,#32 ; add a space
+ mov al,#32 ; add a space ; Dflcmd에 값이 있으면 parmline에 공백을 한칸 넣는다.
  stosb
  dec cx ; count character
- jz cpovfl
+ jz cpovfl ; cx가 0이면 패스
 cpcodsp:
 
 
@@ -1197,14 +1197,14 @@ cpcodsp:
  cmp dword ptr (si),#0x3d6d656d ; "mem="
 
  jne cpnotmem
- call getmem ; get the user-provided memory limit
+ call getmem ; get the user-provided memory limit ; Dflcmd가 "mem="이면 mem 뒤에 오는 값을 계산해서 hma에 넣는다.
 cpnotmem:
  lodsb ; fetch next byte
  cmp al,#32 ; space ?
- je cpcodsp ; yes -> discard it
+ je cpcodsp ; yes -> discard it ; 다음글자가 공백이면 위로 올라간다.
 cpcolp: or al,al ; NUL ?
  jz cpcodn ; yes -> done
- stosb ; store byte
+ stosb ; store byte ; 끝이 아니면 parmline에 공백을 넣어주고 다음 처리 준비
  dec cx ; count character
  jz cpovfl
  cmp al,#32 ; a space ?
@@ -1226,17 +1226,17 @@ cpvalp: lodsb ; copy one byte
 cpovfl: mov (di),cl ; CX is zero
 
 
-
+! parmline에 복사 완료
 cpdone:
 # 1586 "second.S"
  mov es,[initseg] ; load the original boot sector
  xor bx,bx ; load now
- call load1
+ call load1 ; initseg:0에 1섹터 로드 bootsect.S
  pop si ; restore SI
  lodsw ; get flags bit map
  xchg bx,ax ; move to BX
  lodsw ; copy parameters ... VGA mode ... (done)
- cmp word ptr vgaovr,#0x8000 ; VGA mode not overridden on
+ cmp word ptr vgaovr,#0x8000 ; VGA mode not overridden on ; VGA_NOCOVR
     ; command line ?
  je vganorm ; no -> go on
  mov ax,vgaovr ; use that value
@@ -1276,26 +1276,26 @@ nolock:
  jnz lsetup
  mov cl,#4 ; default is to load four sectors
 lsetup:
- mov es,[setupseg] ; load the setup codes
+ mov es,[setupseg] ; load the setup codes ; 일반적으로 0x9020 initseg 다음 섹터
 
 
- mov ax,cx ; number of sectors to AX
- shl ax,#5 ; convert to paragraphs (9-4)
+ mov ax,cx ; number of sectors to AX ; 섹터수는(/512(==2^9))
+ shl ax,#5 ; convert to paragraphs (9-4) ; <<5번하면 세그먼트 단위가 된다.
  mov bx,es
- add bx,ax
- add bx,#STACK>>4 ; allow for stack space in paragraphs
- mov ax,cs ;
+ add bx,ax ; setupseg(0x9020) + (setup) 세그먼트 크기
+ add bx,#STACK>>4 ; allow for stack space in paragraphs ; 스택의 세그먼트 단위를 위 결과에 더해준다.
+ mov ax,cs
  cmp bx,ax
- jbe enough_mem
+ jbe enough_mem ; 로드한 크기가 현재 코드를 침범하지 않으면 enough_mem
  mov bx,#msg_mem ; we are very short on memory
- call say
+ call say ; 스택이 오버랩됐다고 메세지 출력
 
 enough_mem:
 
 
  xor bx,bx ; other operating system)
 lsloop: push cx
- call loadopt
+ call loadopt ; 0x9020에 섹터수만큼 로드하고 launch ; 실제 리눅스???
  pop cx
  loop lsloop
 
@@ -1303,14 +1303,14 @@ lsloop: push cx
 
 
  pop bx ; get flags
- test bx,#8 ; "modern" kernel ?
+ test bx,#8 ; "modern" kernel ? FLAG_MODKRN	; bzimage?
  jz loadlow ; no -> avoid all patching and such
  seg es ; set loader version
- mov byte ptr (16),#0x02
+ mov byte ptr (16),#0x02 ;LOADER_VERSION ; setupseg:16에 로더 버전을 넣어준다.
 
- test bx,#256 ; load kernel high
- jz nohigh
-
+ test bx,#256 ; load kernel high ; FLAG_LOADHI
+ jz nohigh ; loadhi가 꺼져있으면 gdt 설정 않음.
+! gdt 세팅
  seg es
  mov ax,word ptr (20+1) ; get start address 00 1000 00
  mov (gdt+0x1b),ax
@@ -1320,16 +1320,16 @@ lsloop: push cx
 nohigh:
 
  seg es ; version >= 1 ?
- cmp word ptr (6),#0x200
+ cmp word ptr (6),#0x200 ; NEW_HDR_VERSION 버전이 0x200 이하면 노힙!
  jbe noheap ; no -> do not patch heap
  mov ax,cs
  sub ax,[initseg] ; find no. of paragraphs available
- shl ax,4
- add ax,#Parmline-SETUP_STACKSIZE-BOOTSECT
+ shl ax,4 ; init부터 second 시작부분까지 바이트 크기
+ add ax,#Parmline-SETUP_STACKSIZE-BOOTSECT ; parmline-2048-512 ; SLA_SIZE_DYN ; setup load area size dynamic
  seg es
- mov word ptr (36),ax
+ mov word ptr (36),ax ; 힙을 구해서 넣어준다.
  seg es ; patch flags
- or byte ptr (17),#0x80
+ or byte ptr (17),#0x80 ; LFLAG_USE_HEAP
 noheap:
  pop si ; restore pointer to Descr to load
 
@@ -1357,7 +1357,7 @@ noheap:
 
 
 
- call lfile ; load the system ...
+ call lfile ; load the system ... ; 반복해서 읽는다.
  jmp launch2 ; ... and run it
 loadlow:
 
@@ -1366,7 +1366,7 @@ loadlow:
 
 
 
- call loadfile ; load the system
+ call loadfile ; load the system ; map을 다 읽어들인다.
 launch2:
 
  jmp launch ; go !
@@ -1379,14 +1379,14 @@ lfile: call load
  jmp lfile
 
 ! Load one sector. Issue an error at EOF.
-
+! load1을 호출하면 sa_size 구조체 하나(1섹터)만 읽고 리턴한다. 
 load1: call loadit ; load the sector
  mov bx,#msg_eof ; we only get here at EOF
  call say
  br restrt
 
 loadit: call load ; load it
- pop ax ; drop return address of load1
+ pop ax ; drop return address of load1 ; 윗부분 call을 건너뛴다.
  ret
 
 ! Load one sector. Start the system at EOF.
@@ -1399,7 +1399,7 @@ loadopt: call loadit ; load the sector
 load: push es ; save ES:BX
  push bx
 lfetch: mov si,moff ; get map offset
- mov bx,[map] ; map==읽어들인 섹터 인덱스의 메모리 주소
+ mov bx,[map] ; 읽어들인 맵섹터(sa_size구조체의 집합)
  mov cx,(bx+si) ; get address [Map+moff]
  mov dx,(bx+si+2)
  mov al,(bx+si+4)
@@ -1414,8 +1414,8 @@ lfetch: mov si,moff ; get map offset
 noteof: add si,#sa_size ; increment pointer ; cx,dx,al 5바이트 ; 다음 섹터 위치
  mov moff,si
  cmp si,#512 - sa_size + 1 ; page end ?
- jb near doload  ; 인덱스의 끝이 아니면 상위메모리 혹은 일반으로 읽어들인다.
-! 이 부분은 인덱스의 마지막 주소를 의미한다. 마지막 주소로 다음 인덱스의 주소를 읽는다.
+ jb near doload  ; 맵의 끝이 아니면 상위메모리 혹은 일반으로 읽어들인다.
+! 맵섹터의 마지막 sa_size(5bytes)는 다음 맵 섹터다.
  mov moff,#0 ; reset pointer
  push cs ; adjust ES
  pop es
@@ -1435,11 +1435,11 @@ noteof: add si,#sa_size ; increment pointer ; cx,dx,al 5바이트 ; 다음 섹�
 
 launch:
 ; terminate emulation if CD boot
- test byte ptr [par2_flag2],#2 ; a CD?
+ test byte ptr [par2_flag2],#2 ; a CD? FLAG2_EL_TORITO	
  jz not_el_torito
  mov si,#Map ; empty command packet
  mov byte ptr (si),#0x13 ; size of command packet
- mov ax,#0x4b00 ; terminate emulation
+ mov ax,#0x4b00 ; terminate emulation ; Bootable CD-ROM - TERMINATE DISK EMULATION
 ;;;; mov dl,al ; DL is 0
  mov dl,[init_dx] ; terminate boot device
  int 0x13
@@ -1450,11 +1450,11 @@ not_el_torito:
  call crlf ; display a CRLF
 
 
- mov dx,#0x3f2 ; stop the floppy motor
+ mov dx,#0x3f2 ; stop the floppy motor ; 모터를 꺼줍니다.
  xor ax,ax
  out dx,al ; outb
  mov dl,al
- int 0x13 ; reset the FDC (AH=0)
+ int 0x13 ; reset the FDC (AH=0) ; ah=0 dl=드라이브. 플로피 디스크 리셋
 
  mov es,[initseg] ; adjust segment registers
  mov di,#Parmline ; set parameter line offset
@@ -1473,7 +1473,7 @@ mbchain:
 
  seg fs ; suppress BIOS data collection
  or byte ptr par1_prompt+SSDIFF,#16 ; suppress BIOS data collection
-
+! 바이오스 수집
 
    ; ES:DI will point at param line (chain.b)
  push ds ; save DS
@@ -1601,9 +1601,9 @@ start_setup2: ; chain loader boot comes here
  mov ax,#1500/55 ; about 1.5 second
  call setto ; set timeout
 vpaus1: test byte ptr timeout,#-1
- jz vpaus1
+ jz vpaus1 ; 시간 대기
 
- call remto ; free timer interrupt
+ call remto ; free timer interrupt ; 타이머 인터럽트 복구
 
  push es ; is initseg
  pop ds ; DS = 0x9000 (initseg)
@@ -1618,14 +1618,14 @@ vpaus1: test byte ptr timeout,#-1
 if ~*&1 ; align to an odd memory location
  nop
 endif
- jmpi 0,SETUPSEG ; segment part is a variable
+ jmpi 0,SETUPSEG ; segment part is a variable ; 커널로 점프
 setupseg = *-2 ; setupseg is filled in now
 initseg: .word INITSEG
 
 
 ! Load one sector (called from load)
 
-doload: pop bx ; restore ES:BX
+doload: pop bx ; restore ES:BX ; 메인에서 호출될때 bx 값
  pop es
 
 ! Load a sequence of sectors, possibly moving into "high memory" (> 1 MB)
@@ -1641,7 +1641,7 @@ xread: push ax ; ES == 0 ?
 
  jmp sread
 
-rdhigh: push bx ; okay - DS:BX points to GDT in this case
+rdhigh: push bx ; okay - DS:BX points to GDT in this case ; sread로 읽어서 1M이상 메모리로 옮긴다.
  mov bx,#LOADSEG ; adjust ES:BX ; 0x1000
  mov es,bx
  xor bx,bx
@@ -4363,7 +4363,7 @@ vgatab:
 
 ! get numeric string suffixed with "KkMmGg"
 ! updates SI
-
+! 단위를 바꿔준다. 기본단위는 kilo
 get_K:
  push cx ; save CX
 
@@ -4407,7 +4407,7 @@ gmthis2:
  ret
 
 gmvbig:
- mov eax,#0x38000000/1024
+ mov eax,#0x38000000/1024 ; high memory max
  jmp gmthis
 
 
@@ -4416,7 +4416,7 @@ gmvbig:
 getmem:
  push si ; save SI for copying
  add si,#4 ; advance to number?
- call get_K
+ call get_K ; bl=다음값
  jc gmcopy ; error, just copy it
 
  cmp bl,#0x40 ; is it '@'
@@ -4818,7 +4818,7 @@ theends = the_end1/512	! theends = theend의 섹터크기 ; 코드끝까지 섹�
  .align 512		! 섹터단위 정렬 ; max_secondary는 코드&데이터부분 다음 섹터에 위치한다.
 max_secondary:	
 # 4140 "second.S"	! max_seocndary = theend 다음 섹터
-Map = max_secondary + 512	! Map = max_secondary + 1 (sector)
+Map = max_secondary + 512	! Map = max_secondary + 1 (sector) menu일때 20번째 섹터
 Dflcmd = Map + 512			! Dflcmd = max_secondary + 2
 Map2 = Dflcmd				! Map2 = max_secondary + 2
 Keytable = Dflcmd + 512 	! Keytable = max_secondary + 3

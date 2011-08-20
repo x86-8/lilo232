@@ -537,7 +537,7 @@ disk_okay: ! 디스크 읽기가 성공적이면 스택을 복원
 ! Pointer Read -- read using pointer in DS:SI
 ! [DS:SI]==섹터주소 es:bx==메모리 공간. 섹터주소가 0이면 리턴 zf=0
 pread:
- lodsd ! get address
+ lodsd ! get address ; 4바이트를 읽어온다. 인덱스는 4바이트 구조체
  or eax,eax
  jz done
  add eax,[raid](bp) ! reloc is 0 on non-raid 레이드를 위해 섹터주소 보정
