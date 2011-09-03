@@ -684,13 +684,13 @@ gotinp: cmp al,#9 ; TAB ?
  je cr ; yes -> go on
  cmp al,#127 ; DEL ?
  je todelch ; yes -> erase one character
- ja input ; non-printable -> ignore it ; 0x80이상은 출력불가
+ ja input ; non-printable -> ignore it ; 0x80이상은 출력하지 않는 문자들
  cmp al,#21 ; ^U ? ; C-u는 보통 한줄지움
  je todell ; yes -> erase the line
  cmp al,#24 ; ^X ?
  je todell ; yes -> erase the line
  cmp al,#32 ; ignore non-printable characters except space
- jb input ; 32 미만의 제어문자들도 출력불가. 위에 있는것들 빼고는 무시한다.
+ jb input ; 32 미만의 제어문자들도 위에서 처리한 것들 빼고는 무시한다.
  ja noblnk ; no space -> go on ; 32이상 글자들 숫자,기호,알파벳
  cmp (bx-1),al ; second space in a row ? ; 키입력이 공백이면 공백이 중복인지 체크한다.
  je input ; yes -> ignore it
@@ -715,11 +715,11 @@ noblnk: cmp bx,#cmdline+CL_LENGTH-1 ; at end of buffer ? ; cmdline의 최대크�
  mov cx,#IMAGES ; check if we have a single-key entry
  mov di,#DESCR0
  mov ah,al
-sklp: test word ptr (di+id_flags),#4096 ; single-key entry ?
+sklp: test word ptr (di+id_flags),#4096 ; single-key entry ? ; 싱글키 옵션. a-z등 한글자만 누르면 일치하는 이미지로 부팅
  jz sknext ; no -> try next
  mov al,(di) ; get first character
 
- call upcase ; convert to upper case
+ call upcase ; convert to upper case ; al을 소문자 -> 대문자
 
  cmp al,ah ; do we have a match ?
  jne sknext ; no -> try next
@@ -733,12 +733,12 @@ todelch: br delch ; ...
 todell: br delline ; ...
 
 ! End of input, process the command line
-! cmdline이 null일때 처리하는 부분. 키입력(혹은 옵션처리)부분을 끝낸다. 키가 눌려져 있다면 iloop로 가서 세팅과 환명메세지부터 다시 시작한다.
-nul: push bx ; automatic boot - wait for timeout 
+! cmdline의 끝(null)이면 저장된 옵션 처리를 끝낸다. 키가 눌려있다면 대화식 처리-iloop로 돌아가 키입력을 받는다.
+nul: push bx ; automatic boot - wait for timeout ; 키부분의 Null(0)이 아닌 저장된 null값의 처리
  mov ax,old_del
  call waitsh
  pop bx
- jnc crnul ; no key pressed -> continue
+ jnc crnul ; no key pressed -> continue ; 키가 눌렸다면 대화식 처리
  mov bx,#msg_int ; interrupted -> display a message
  call say
  mov byte ptr cmdline,#0 ; clear the command line
@@ -838,7 +838,7 @@ bcmd:
  br iloop ; get more input
 
 ! Delete one character
-
+! 한글자 지운다.
 delch: cmp bx,#cmdline ; at the beginning ?
  je toinput ; yes -> do nothing
  dec bx ; move the pointer
@@ -850,17 +850,17 @@ delch: cmp bx,#cmdline ; at the beginning ?
 toinput: br input ; go on
 
 ! Delete the entire line
-
+! 한줄 지우는 루틴
 delline:
 
  cmp bx,#cmdline ; done ?
  je toinput ; yes -> go on
  push bx ; display BS,SPC,BS
- mov bx,#bs
+ mov bx,#bs ; backspace, space, backspace 출력
  call say
  pop bx
  dec bx ; move the pointer
- jmp delline ; next one
+ jmp delline ; next one ; 첫글자까지 지우는걸 반복한다.
 
 
 
@@ -1131,7 +1131,7 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
 ;seg fs
  mov al,mt_dflcmd+4+Keytable+256
 ;
- call cread ; DFLcmd를 다시 읽어온다.
+ call cread ; DFLcmd를 읽어온다.
  push word ptr (Dflcmd) ; push magic number
  mov bx,#Dflcmd ; load the fallback sector
  call load1 ; 폴백 섹터(1sector)를 읽어온다.
@@ -1724,12 +1724,12 @@ reset: call say ; 에러메세지와 에러코드 출력후 restrt부터 다시 
  br restrt
 
 ! Convert character in AL to upper case
-
+! al이 소문자일때만 대문자로 만든다.
 upcase: cmp al,#0x61 ; lower case character ? ('a')
  jb nolower ; no -> go on
  cmp al,#0x7a ; 'z'
  ja nolower
- sub al,#0x20 ; convert to upper case
+ sub al,#0x20 ; convert to upper case ; 소문자 a-z일때만 0x20('a'-'A')를 뺀다.
 nolower: ret ; done
 
 pause:
