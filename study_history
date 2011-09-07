@@ -1,10 +1,8 @@
 Kernel 스터디 8차 (x86 초급) 위키 페이지입니다.
 
-1차 교재 : <리눅스 커널의 내부구조> / 문서 /
-
-2차 교재 : <만들면서 배우는 OS 캐널의 구조와 원리> / 문서 /
-
-부트로더 분석 : LILO 23.2 (first.s, second.s) / 문서 /커밋 :  http://code.google.com/p/linx86study8-lilo232/
+1차 교재 : <리눅스 커널의 내부구조>
+2차 교재 : <만들면서 배우는 OS 캐널의 구조와 원리>
+부트로더 분석 : LILO 23.2 (first.s, second.s) / 커밋 :  http://code.google.com/p/linx86study8-lilo232/
 
 <모임내용>
 회차:날짜:인원:내용
@@ -31,3 +29,4 @@ Kernel 스터디 8차 (x86 초급) 위키 페이지입니다.
 20:2011/08/06:10:<second.s> _main(338-449)
 21:2011/08/13:09:<second.s> _main(449-1137)->load1(1383)->loadit(1388)->load(1399-1402)
 22:2011/08/20:07:<second.s> _main(1137-1623) / second.s 완료
+23:2011/09/03:10:<header.S>, <main.c> main(128-131)->copy_boot_params(29-39)

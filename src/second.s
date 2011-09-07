@@ -1106,7 +1106,7 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
  xchg cx,ax
  lodsw
  xchg dx,ax
-        lodsb
+ lodsb
 
  push si ; save SI
 
