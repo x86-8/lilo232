@@ -189,7 +189,7 @@ start: cld ; only CLD in the code; there is no STD
  seg cs	; segment prefix = cs: = 2Eh
  mov [init_dx],dx ; save DX passed in from first.S ; DX(시작 드라이브)의 정보를 [cs:init_dx]에 저장한다.
 
- int 0x12 ; get memory available ; 메모리의 값. ax = 640-EBDA(KB) 값을 리턴한다.
+ int 0x12 ; get memory available ; 메모리의 값. ax = 640-EBDA(KB) 값을 리턴한다. http://is.gd/YidBqs, http://is.gd/4d0zzT
 
 
 
@@ -547,7 +547,7 @@ kbd_present:
 
  jnz extp ; yes -> check for external parameters ; (first) FLAG_PROMPT가 켜있으면 extp로 넘어간다.
 skip_prompt: ; 이 곳은 키보드와 시리얼이 없거나 PROMPT 옵션이 꺼져 있을 때만 온다.
- mov nodfl,#bfirst ; boot first image if falling through ; 다음 분기할 곳=첫번째 이미지로 부팅하는 곳 (bfirst)
+ mov nodfl,#bfirst ; boot first image if falling through ; 다음 분기할 곳=첫번째 이미지로 부팅하는 곳 (bfirst) = 커널 부팅 루틴
  call waitsh ; wait for a shifting key ; 키가 눌러졌거나 시리얼에서 break신호가 오면(cf=1) 바로 iloop로 간다.
  jc iloop ; key pressed -> enter interactive mode 
 
@@ -886,15 +886,15 @@ brfrst:
  call vmtest
  jnc brfrst0v ; not virtual
  mov ax,#2048 ; FLAG_VMDEFAULT
-brfrst0v:
+brfrst0v:     ;vm test 완료
  call kbtest
  jc brfrst0k
  mov ax,#0x4000 ; FLAG_NOKBDEFAULT
-brfrst0k:
+brfrst0k:	; kb test 완료
 
  mov cx,#IMAGES
-brfrst1: test word ptr (bx+id_flags),ax
- jnz brfrst3 ; 같은 플래그의 커널 이미지를 찾는다.
+brfrst1: test word ptr (bx+id_flags),ax ; 같은 플래그의 커널 이미지를 찾는다.
+ jnz brfrst3 ; flag가 같다면, brfrst3으로 넘어간다
  add bx,#id_size
  loop brfrst1
 
@@ -965,8 +965,8 @@ boot9:
  jz dopw ; no -> get the password
  cmp byte ptr (si),#0 ; are there any options ?
  jne dopw ; yes -> password required
-toboot: br doboot ; ...  
-dopw:
+toboot: br doboot ; ...  부팅합시다~ ^^
+dopw:	;password 입력
 
  push bx ; save the image descriptor
 ;;
@@ -981,7 +981,7 @@ dopw:
  sub sp,#CL_LENGTH ; allocate space for PW string
  mov si,sp ; si points at string
  xor di,di ; di counts characters
-pwloop:
+pwloop:	   
 # 1209 "second.S"
  mov cx,#pwtime ; get timeout exit
  call getkey
@@ -1848,7 +1848,7 @@ serret: pop dx ; done
 
 
 ! Get a key (CX = timeout exit)
-! timeout 시간까지 키입력과 시리얼 입력을 기다린다. 시간이 다되면 cx로 점프한다.
+! timeout 시간까지 키입력과 시리얼 입력을 기다린다. 키가 눌리거나, 시간이 다되면 cx로 들어온 Handler 점프한다.
 getkey: ;;
 ;; seg fs ; set the timeout
  mov ax,par2_timeout ;DSC_OFF-10+SSDIFF
@@ -2177,12 +2177,12 @@ ln_do_read:
 
 ; vmtest -- return Carry=1 if in virtual (VMware) mode
 ; return Carry=0 if in real mode
-;
+; 보호모드가 켜져있을 경우 virtual machine 에서 돌아간다고 가정.
 vmtest:
 
  pushad ; save all extended registers
- smsw ax ; msw를 읽어들인다.
- rcr al,1 ; PE bit in AL to Carry
+ smsw ax			;ax에 machine 상태를 저장한다.
+ rcr al,1 ; PE bit in AL to Carry ; 오른쪽으로 PE비트값을 carry로 밀어낸다.
  jc vm_ret ; exit if virtual mode ; 보호모드에서 실행중이면 리턴 cf=1
 
 
@@ -2200,9 +2200,10 @@ vmtest:
  jz vm_ret ; TEST clears the carry, always
 ;
 ; VMware(R) test for virtual mode
+;Hypervisor port 참조 : http://is.gd/RAiIvh
 ; vmware backdoor io port(0x5658)으로 vmware에서 실행중인지 확인하는 코드
  mov eax,#0x564D5868 ; EAX: in = 'VMXh' out = version ; io port에서 읽어들이기 전에 eax에 매직넘버를 넣어줘야한다.
- xor ebx,ebx ; EBX: out = 'VMXh' under vmware
+ xor ebx,ebx ; EBX: out = 'VMXh' under vmware ; in을 통해 값을 읽으면, ebx
  mov edi,eax
  mov dx,#0x5658 ; DX: in = 'VX'
  mov ecx,#10 ; ECX: in = VMXGetVersion ; ECX에는 명령어가 온다. 10은 getversion
@@ -2233,7 +2234,7 @@ kbtest:
  jz kbtest8 ; NOKBD가 꺼져있으면 cf=1 리턴
 # 2828 "second.S"
  cli ; added 5/17/2006
- mov al,#0xee ; echo command
+ mov al,#0xee ; echo command = 0xEE
  out #0x60,al
 wait_kbd_ctrl_ready:
  in al,#0x64 ; 읽기:상태레지스터, 쓰기:커맨드레지스터
@@ -2297,7 +2298,7 @@ crc32b: shl bx,#1 ; get hi bit of char in BH ; 데이터의 1bit
   adc bh,#0 ; add carry to BH ; 위의 두 비트를 xor한다.
   shr bh,#1 ; put bit in carry 
   jnc crc32c ; skip the xor
-  xor eax,(bp+4) ; xor in the polynomial ; 두 비트의 xor이 1이면 키값을 xor
+  xor eax,(bp+4) ; xor in the polynomial ; crc32 값을 의미한다.
 crc32c:
   loop crc32b ; loop back for 8 bits ; 8비트짜리 작은 루프
   jmp crc32a ; 다음 데이터 1byte
@@ -2310,8 +2311,8 @@ crc32d:
   pop di
   pop si
 
-  leave
-  ret 4
+  leave 			; enter 와 반대, 설정된 스택프레임을 해제화한다.
+  ret 4				; return 시 sp-=4를 한다. stdcall 규약시에도 ret 를 통해 sp 조정을 한다고 함.
 
 
 ; enter with BX == Ramdisk size (in 4k pages)
