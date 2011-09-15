@@ -1,0 +1,265 @@
+digraph second {
+size="22,22";
+//page="10,10";
+ratio="expand";
+_main [shape=ellipse,label="Second stage"];
+node [shape=box];
+_main->start [label="데이터 부분 점프"];
+start [label="EBDA를 구한다.\n(640K-EBDA)-second크기\n에 자가복제"];
+start->init_bss;
+init_bss [label="BSS 0으로 초기화"];
+init_bss->continue [label="복사한 코드로 점프"];
+continue [label="serial 초기화\nserial로 \"LI\"출력\n이제 serial도 같이 출력"];
+continue->drkbd
+drkbd [label="키보드 버퍼 비움"]; // 32회
+drkbd->comcom;
+comcom [label="\"L\" 출력"];
+comcom->int_1e;
+int_1e [label="INT 0x1E의\n섹터수가 9보다 큰가?",shape=diamond];
+int_1e->dskok [label="Yes"];
+int_1e->patch_1e [label="No",style=dotted];
+patch_1e [label="섹터수를 18로 패치"];
+patch_1e->dskok [style=dotted];
+dskok [label="timeout 핸들러 설치"];
+dskok->restrt;
+restrt [label="Second와 0x90000\n사이에 32KB 공간이 있는가?",shape=diamond]
+restrt->initseg_9000 [label="Yes"];
+restrt->initseg_8xxx [label="No",style=dotted];
+initseg_9000 [label="initseg=0x9000"];
+initseg_8xxx [label="initseg=Second(segment)-0x800"];
+initseg_9000->restrt1;
+initseg_8xxx->restrt1 [style=dotted];
+restrt1 [label="setupseg=initseg+0x20\n스택위치=Second아래"];
+restrt1->chkver;
+chkver [label="문자열(LILO,MAGE)\n스테이지(2),버전(23.2) 체크",shape=diamond];
+chkver->crshbrn [label="wrong",style=dotted];
+chkver->crsh_ok [label="OK"];
+//{rank=same;restrt1 zzz}
+crshbrn [label="\"signature not found\" 출력"];
+crshbrn->zzz [style=dotted];
+zzz [label="halt 무한루프"];
+crsh_ok [label="부팅된 하드와\n저장된 하드가 다른가?",shape=diamond];
+crsh_ok->ldsc [label="same"]
+crsh_ok->devmap_ax [label="diff",style=dotted]
+devmap_ax [label="부팅hdd:저장된hdd번호를\ndevmap에 추가한다."];
+devmap_ax->ldsc [style=dotted];
+ldsc [label="First와 Second의\n map 생성시간이 같은가?",shape=diamond]
+ldsc->call_kt_read [label="Yes"];
+ldsc->timeerr [label="No",style=dotted];
+timeerr [label="\"O - Timestamp mismatch\" 출력"];
+timeerr->zzz [style=dotted];
+call_kt_read [label="키보드 테이블 섹터를 읽는다.\n여기엔 Menutable도 포함"];
+call_kt_read->call_build_vol_tab;
+call_build_vol_tab [label="물리:논리 디스크\nvolume table 생성."];
+call_build_vol_tab->descr_more;
+descr_more [label="디스크립터\n 섹터수만큼 읽는다."];
+descr_more->ldsc [label="error",style=dotted];
+descr_more->descr_crc;
+descr_crc [label="CRC32 체크",shape=diamond];
+descr_crc->timeerr [label="error\n메세지\n버그같다",style=dotted];
+descr_crc->nochkerr [label="OK"];
+nochkerr [shape=diamond,label="vmware가\n동작중인가?"] 
+nochkerr->virtual_done [label="No"];
+nochkerr->vir_loop [label="Yes",style=dotted];
+vir_loop [label="VMDISABLE인\n디스크립터 삭제"];
+vir_loop->virtual_done [style=dotted];
+virtual_done [label="키보드가\n연결되었는가?",shape=diamond];
+//virtual_done->kbd_done [label="Yes"];
+virtual_done->ldfl [label="Yes"];
+virtual_done->kbd_loop [label="No",style=dotted];
+kbd_loop [label="NOKBDISABLE인\n디스크립터 삭제"];
+kbd_loop->ldfl [style=dotted];
+//kbd_loop->kbd_done [style=dotted];
+//kbd_done [label="OR(menutable플래그,First플래그)"];
+//kbd_done->ldfl
+ldfl [label="Default command line 로드"];
+ldfl->ldsc [label="error",style=dotted];
+ldfl->dc_magic [label="OK"];
+dc_magic [label="Default command line\n 첫값이 DC_MAGIC인가?",shape=diamond];
+dc_magic->bdcmag [label="No"];
+dc_magic->call_cmd_write [label="Yes"];
+call_cmd_write [label="Dflcmd=DC_MGOFF\n바꾼 값을 디스크에 기록"];
+call_cmd_write->dokay;
+bdcmag [label="[Dflcmd+2]=NUL"];
+bdcmag->dokay;
+dokay [label="\"O 23.2 \" 출력"];
+dokay->reset_hma;
+reset_hma  [label="hma=0\n분기점=iloop"];
+reset_hma->call_kbtest;
+call_kbtest [label="키보드 또는 시리얼이\n연결중?",shape=diamond];
+call_kbtest->kbd_present [label="Yes"];
+call_kbtest->skip_prompt [label="No",style=dotted];
+kbd_present [label="FLAG_PROMPT?",shape=diamond];
+kbd_present->skip_prompt [label="OxFF",style=dotted];
+kbd_present->extp [label="On"];
+skip_prompt [label="분기점=bfirst"];
+skip_prompt->call_waitsh;
+call_waitsh [label="키가 눌렸거나\nbreak signal이 왔는가?",shape=diamond];
+call_waitsh->iloop [label="Yes",style=dotted];
+call_waitsh->extp [label="No"];
+extp [label="external\nparameter 사용?",shape=diamond];
+extp->noex [label="No"];
+extp->extp_cl [label="Yes",style=dotted];
+extp_cl->yes_extp;
+extp_cl [label="external parameter의\n커맨드라인을\n버퍼로 세팅"];
+{rank=same;extp_cl noex};
+yes_extp [label="레지스터를\nexternal parameter\n 값으로 세팅\nsignature 확인"];
+yes_extp->empty_extp_cl;
+empty_extp_cl [label="external parameter\ncommand line 값이 있는가?"];
+empty_extp_cl->iloop [label="No"];
+empty_extp_cl->niloop [label="Yes"];
+noex [label="Dflcmd+2로\n버퍼 세팅"];
+noex->noex_cmp;
+noex_cmp [label="버퍼값이\nNUL(0)인가?",shape=diamond];
+noex_cmp->niloop [label="Yes",style=dotted];
+noex_cmp->jmp_ax [label="No"];
+jmp_ax [label="분기점으로 점프"];
+jmp_ax->iloop [label="iloop"];
+jmp_ax->bfirst [label="bfirst"];
+iloop [label="메세지가 있고\n출력된적 없는가?",shape=diamond];
+iloop->greeting [label="Yes",style=dotted];
+iloop->nomsg [label="No"];
+greeting [label="greeting 메세지를\n 읽어서 출력"];
+greeting->nomsg [style=dotted];
+nomsg [label="cmdbeg=\"auto BOOT_IMAGE...\"\n버퍼에 0xff넣음"];
+nomsg->niloop;
+{rank=same;niloop iloop};
+niloop [label="\"boot: \" 출력"];
+niloop->clend;
+clend [label="cmdline의\n옵션 출력"];
+clend->input;
+//clend->cledne;
+//cledne [label="\"BOOT_IMAGE\"에 \" \" 추가"];
+//cledne->input;
+input [label="버퍼값이 0xFF인가?"];
+{rank=same;kbinp fetch_si}
+input->kbinp [label="Yes"];
+input->fetch_si [label="No",style=dotted];
+fetch_si [label="키입력대신\n버퍼에 저장된\n 문자를 넘긴다."]; // si++
+fetch_si->gotinp [style=dotted];
+kbinp [label="키입력을 받는다."];
+kbinp->brfrst [label="시간 초과",style=dotted];
+kbinp->noNull;
+noNull [label="입력값이\nNUL인가?",shape=diamond];
+noNull->gotinp [label="No"];
+noNull->input [label="Yes\n키입력 NUL\n은 무시",style=dotted];
+gotinp [label="입력받은 키값이나\n넘어온 문자값",shape=diamond];
+gotinp->tolist [label="TAB\n?"];
+gotinp->nul [label="NUL\n(버퍼끝)"]; // end of process
+gotinp->todelch [label="BS\nDEL"]; // BS
+gotinp->input [label="X<32\nX>127\n무시",style=dotted]; // <32 >127
+gotinp->todell [label="^U\n^X"]; // erase the line
+gotinp->noblnk [label="32<X<127\n"];
+gotinp->dup_blnk [label="Space"];
+gotinp->cr [label="Enter"];
+tolist [label="이미지들 출력"];
+tolist->iloop;
+nul [label="키입력이\n있는가?",shape=diamond];
+nul->crnul [label="No"]
+nul->msg_int [label="Yes",style=dotted]
+msg_int [label="\"Interrupted\" 출력"];
+msg_int->iloop;
+todelch [label="한글자\n삭제"];
+todelch->input;
+todell [label="버퍼\n삭제"];
+todell->input;
+dup_blnk [label="Space가 중복인가?"];
+dup_blnk->input [label="Yes",style=dotted];
+dup_blnk->noblnk [label="No"]
+noblnk [label="버퍼크기\n초과?",shape=diamond];
+noblnk->input [label="Yes"];
+noblnk->sklp [label="cmdline에\n문자저장/출력\n(끝=NUL)"];
+sklp [label="위치가 처음이고\n일치하는 single-key\n이미지가 있는가?",shape=diamond];
+sklp->input [label="No"];
+sklp->cr [label="Yes"];
+cr [label="cmdbeg=\"BOOT_IMAGE...\""];
+cr->crnul;
+crnul [label="disable locking"];
+crnul->cpsav;
+cpsav [label="입력받은\ncmdline에서\n lkcbuf로 복사\n(null end)"];
+cpsav->empty_inp;
+empty_inp [label="cmdline에 내용있고\n끝이 공백인가?",shape=diamond];
+empty_inp->notrspc [label="No"];
+empty_inp->rm_empty [label="Yes"];
+rm_empty [label="command line끝\n 공백 제거"];
+rm_empty->notrspc
+notrspc [label="읽을 버퍼=\n쓸 버퍼=\ncmdline\n"];
+notrspc->chkvga;
+chkvga [label="버퍼값이 \"nobd\"\n&다음글자<=32 ?",shape=diamond];
+chkvga->vsktv [label="No"];
+chkvga->do_nobd [label="Yes"];
+do_nobd [label="NOBD 플래그를 켠다"];
+do_nobd->vskwd;
+vsktv [label="버퍼값이 \"vga=\" ?",shape=diamond];
+vsktv->call_setvga [label="Yes"];
+vsktv->vsktk [label="No"];
+call_setvga [label="\"vga=\"다음\n수치를 해석해서\nvgaovr에 입력"];
+call_setvga->iloop [label="error",style=dotted];
+call_setvga->vskdb;
+vsktk [label="버퍼값이 \"kbd=\" ?",shape=diamond];
+vsktk->vsktl [label="No"];
+vsktk->call_putkbd [label="Yes"];
+call_putkbd [label="\"kbd=\"다음\n키코드를 키버퍼에\n넣는다."];
+call_putkbd->vskdb;
+vsktl [label="버퍼값이 \"lock\" &\n다음이 공백?",shape=diamond];
+vsktl->vsktm [label="No"];
+vsktl->vsktl_lock [label="Yes"];
+vsktl_lock [label="enable locking"];
+vsktl_lock->vskwd;
+vskwd [label="읽기버퍼\n4증가"];
+vskwd->vskdb;
+vskdb [label="쓰기버퍼--"];
+vskdb->vsknb;
+vsktm [label="버퍼값이 \"mem=\" ?",shape=diamond];
+vsktm->vsknb [label="No"];
+vsktm->vsktm_getmem [label="Yes"];
+vsktm_getmem [label="메모리\n상한선 설정"];
+vsktm_getmem->vsknb;
+vsknb [label="문자 복사"];
+vsknb->vsknb_sp;
+vsknb_sp [label="문자가\n공백인가?",shape=diamond];
+vsknb_sp->chkvga [label="Yes",style=dotted];
+vsknb_sp->vsknb_nul [label="No"];
+vsknb_nul [label="문자가\nNUL인가?",shape=diamond];
+vsknb_nul->vsknb [label="No"];
+vsknb_nul->vsknb_crlf [label="Yes"];
+vsknb_crlf [label="CR/LF 출력"];
+vsknb_crlf->emptyl;
+emptyl [label="버퍼가\n비어있나?",shape=diamond];
+emptyl->bfirst [label="Yes"];
+emptyl->bcmd [label="No"];
+bcmd [label="일치하는\n이미지가 있는가?",shape=diamond];
+bcmd->boot [label="Yes"];
+bcmd->bcmd_msg [label="No",style=dotted];
+bcmd_msg [label="\"No such image.\n[Tab] shows a list.\" 출력"];
+bcmd_msg->iloop [style=dotted];
+bfirst [label="cmdline\n이 비었는가?",shape=diamond];
+bfirst->bcmd [label="No"];
+bfirst->brfrst [label="Yes"];
+brfrst [label="처음 플래그가\n일치하는 이미지로 세팅"];
+brfrst->bfcpl;
+bfcpl [label="cmdline에\n이름 복사"];
+bfcpl->boot;
+boot [label="timeout 중지"];
+boot->locopt;
+locopt [label="cmdline끝 공백을\n제거한다."];
+locopt->optfnd;
+optfnd [label="FLAG_VMWARN이 켜있고\nVMWARE에서 동작중?",shape=diamond];
+optfnd->boot9 [label="No"];
+optfnd->optfnd_vmwarn [label="Yes"];
+optfnd_vmwarn [label="vmwarn경고 출력 [Y/N]"];
+optfnd_vmwarn->optfnd_getkey 
+optfnd_getkey [label="키입력을 받는다.",shape=diamond];
+optfnd_getkey->boot3 [label="32미만"];
+optfnd_getkey->optfnd_disp [label="32이상"];
+optfnd_disp [label="입력받은\n문자 출력"];
+optfnd_disp->optfnd_crlf;
+optfnd_crlf [label="CR/LF 출력"];
+optfnd_crlf->boot3;
+boot3 [label="y or Y ?",shape=diamond];
+boot3->boot9 [label="Yes"];
+boot3->iloop [label="No\n시간초과"];
+boot9
+
+
+}

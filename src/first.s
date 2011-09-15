@@ -228,7 +228,7 @@ lagain:
 
  cmp dl,#0xfe ! possible boot command line (chain.S) ! 0xfe
  jne boot_in_dl ! external parameter는 일반적으로 쓰이지 않는다. 
- mov dl,dh ! code passed in DH instead ; external parameter라면 넘어온 dh를 dl에 넣는다. (드라이브 넘버로 추측)
+ mov dl,dh ! code passed in DH instead ; external parameter라면 넘어온 dh를 dl에 넣는다. (external parameter의 드라이브값)
 boot_in_dl:
 
  mov bx,#map2 ! buffer for volume search ! map2는 first 끝. 하드 검색을 위해 MBR을 읽어들일메모리 주소. first 다음(0x7c0:200h)
@@ -248,7 +248,7 @@ boot_in_dl:
  test byte ptr [prompt](bp),#64 ! FLAG_MAP_ON_BOOT ; 덤프결과 레이드가 아닌 상황에서 켜지지 않았다.
  jnz use_boot ! as passed in from BIOS or MBR loader ; 부팅된 하드에 맵파일이 있다면 하드 검색루틴을 건너뛴다. (레이드시 켜지는걸로 추측)
 ! 볼륨검색을 위한 사전준비
-use_installed:
+use_installed: ! 일반적으로 이곳으로 와서 일치하는 볼륨을 검사한다.
  mov dl,dh ! device code to DL ; map이 저장된 곳
  mov esi,[map_serial_no](bp)
  or esi,esi
@@ -283,7 +283,7 @@ vagain:
  je vol_found	! 일치하는 volumeID를 찾았다
  loop vagain ! 시스템의 하드수 만큼 반복
 
- pop dx ! restore specified BIOS code ! 찾지 못했다면 BIOS의 DL을 복구, DH=[d_dev]
+ pop dx ! restore specified BIOS code ! 찾지 못했다면 DL 복구, dh=map의 하드번호, dl=부팅된 하드 혹은 external parameter 하드번호
     ! AX and DX are identical at this point
 
 vol_found:

@@ -271,7 +271,7 @@ restrt: mov bx,cs ; adjust segment registers
  mov ds,bx
  mov es,bx	; ds=es=cs
 
- sub bx,#63*0x20+0x20 ; segment for setup code & MAX_SETUPSECS=커널에서 SETUP의 최대 크기(63); cs - 0x800 = 2048 (바이트 단위로 32k) 
+ sub bx,#63*0x20+0x20 ; segment for setup code & MAX_SETUPSECS=커널에서 SETUP의 최대 크기(63); cs - 0x800 = 2048 (바이트로 바꾸면 32KB) 
       ; bootsect
  mov cx,#INITSEG ; 0x9000
  cmp bx,cx ; bx=second세그먼트-0x800 ; 32k 여유공간이 있는지 체크
@@ -319,10 +319,10 @@ crshbrn2: jne crshbrn ; 문자열이나 버전등이 맞지 않으면 에러출�
 
 
 
-! 부팅된하드와 first의 d_dev값이 다르면 devmap에 AX를 추가한다. devmap 마지막=0
+! 부팅된하드와 first의 d_dev값이 다르면 devmap에 AX를 추가한다. ah=부팅된 하드, al=first에 저장된 하드번호
  stosw ; set up the translation from map -> boot
 end_tt:
- xor ax,ax
+ xor ax,ax ; devmap 마지막은 Null이다.
  stosw
 ! ldsc: 키보드 테이블 로드, 볼륨테이블 생성, Default command line, 디스크립터 로드. 키보드 체크
 ldsc:
@@ -359,7 +359,8 @@ descr_more:
  add di,si 
  cmp eax,dword (di) ; eax에 crc값이 리턴되면 저장된 값과 비교
  jz nochkerr
-! 이 부분은 chkerr로 가거나 timeerr과 chkerr 레이블을 바꿔줘야 할것 같다. 이대로면 time error메세지를 출력한다.
+! 이 부분은 chkerr로 가거나 timeerr과 chkerr 레이블을 바꿔줘야 할것 같다.
+! 이대로면 time error메세지를 출력한다. 버그 같다.
 
 ! Timestamp error
 timeerr:
@@ -389,13 +390,13 @@ vir_loop:
  jz virtual_done
  test word ptr [id_flags](di),#512 ; FLAG_VMDISABLE가 꺼져있으면 스킵
  jz vir_skip
-; FLAG_VMDISABLE이 켜있으면 한칸씩 당겨 덮어쓴다.
+; FLAG_VMDISABLE가 켜있는 디스크립터를 덮어쓴다. (지운다.)
  push di
  lea si,[id_size](di) ; 디스크립터 구조체 한개의 크기 [di+id_size]
 vir_loop1:
  mov cx,#id_size
  rep
-    movsb ; FLAG_DISABLE이 켜있으면 넘기고 덮어씌운다.
+    movsb
  test byte ptr [id_name](di),#0xFF ; 끝까지 복사
  jnz vir_loop1
 
@@ -460,12 +461,12 @@ kbd_done:
  mov bx,#Dflcmd
  cmp word ptr (bx),#0xf4f2 ; okay ?
  jne bdcmag ; no -> do not write
-; DC_MAGIC 이면 DC_MAGIC에 mk를 넣고 DFL 섹터에 저장한다.
+; DC_MAGIC(0xf4f2) 이면 DC_MAGIC에 mk(0x6b6d)를 넣고 DFL 섹터에 저장한다.
  mov word ptr (bx),#0x6b6d ; erase the magic number ; DC_MGOFF=="mk"
  call cmd_write ; write out the command line ; 0x6b6d로 바뀐 내용을 dfl에 쓴다.
 # 598 "second.S"
  jmp dokay ; continue
-bdcmag: mov byte ptr (bx+2),#0 ; disable the command line ; DC_MAGIC(0xf4f2)가 아니면 DFL 시작부분에 null을 채워서 DFL을 무효화 한다.
+bdcmag: mov byte ptr (bx+2),#0 ; disable the command line ; DC_MAGIC(0xf4f2)가 아니면 DFL 시작부분에 null을 채운다.
  jmp dokay ; go on
 fdnok:
 
@@ -532,7 +533,7 @@ dokay: mov bx,#ospc ; display 'O ' ; LIL까지 출력되었고 "O 23.2" 를 출�
 
  call kbtest ; keyboard present?
 
- jc kbd_present
+ jc kbd_present ; 정상이면 건너뛴다.
 ; no PC keyboard on the system, is there a serial port in use?
  cmp byte ptr [par2_port],#0 ; 키보드, 시리얼 연결이 없으면 첫번째 이미지로 부팅할 것이다.
  jz skip_prompt ; no serial keyboard either
@@ -580,7 +581,7 @@ extp:
 
 ! No external parameters after timeout -> boot first image
 ! 입력 처리 전에 세팅해준다.
-noex: push cs ; restore ES ; 0x9???
+noex: push cs ; restore ES ; 0x9000 or 0x8xxx
  pop es
  mov si,#Dflcmd+2 ; default command line ? ; 매직넘버를 제외한 커맨드라인 주소
  cmp byte ptr (si),#0
@@ -601,11 +602,11 @@ iloop:
 ;; seg fs ; message disabled ?
  cmp word ptr par2_msg_len,#0 ;MSG_OFF+SSDIFF,#0 ; 메세지가 있는지 체크
 ;;
- je nomsg ; yes -> skip this ; 메세지가 없으면 출력안함
+ je nomsg ; yes -> skip this ; greeting 메세지가 없으면 출력안함
  call crlf ; 줄넘김
 ; 메세지의 인덱스 섹터를 읽는다.
 ;seg fs ; load the message file
- mov cx,mt_msg+Keytable+256 ;MSG_OFF+SSDIFF+2 ; initial greeing message
+ mov cx,mt_msg+Keytable+256 ;MSG_OFF+SSDIFF+2
 ;seg fs
  mov dx,mt_msg+2+Keytable+256
 ;seg fs
@@ -613,7 +614,7 @@ iloop:
 ;
  mov bx,[map] ; map은 섹터 인덱스가 위치한다.
  call sread ; 인덱스 섹터를 읽는다.
- call loadfile ; map의 인덱스 섹터를 기반으로 여러번 읽는다. es!=0라 xread(상위메모리)가 아닌 sread로 읽는다.
+ call loadfile ; map의 인덱스 섹터를 기반으로 여러번 읽는다. es!=0라 xread(상위메모리)가 아닌 sread로 읽는다. 읽을곳은 Map 다음 Dflcmd
 
  xor bx,bx ; set the terminating NUL and disable further
     ; messages
@@ -638,7 +639,7 @@ niloop: ; ES may point to external params ; no input loop? ; si!=0로 넘어오�
  mov bx,#msg_p ; display boot prompt ; "boot: " 문자열 출력
  call say
  mov bx,#cmdline ; move cursor to the end of the line
-clend: mov al,(bx) ; cmdline에 있는값을 null이 올때까지 출력
+clend: mov al,(bx) ; cmdline의 옵션 출력
  or al,al ; at end ?
  jz cledne ; yes -> go on
  push bx ; display the character
@@ -646,10 +647,10 @@ clend: mov al,(bx) ; cmdline에 있는값을 null이 올때까지 출력
  pop bx
  inc bx ; next one
  jne clend
-cledne: mov byte ptr prechr,#32 ; character before command line is a space ; 나중에 출력하기 위해? "BOOT_IMAGE "
+cledne: mov byte ptr prechr,#32 ; character before command line is a space ; 나중에 사용하기 위해? "BOOT_IMAGE"+" " 문자열에 공백 추가
 
 ! Input loop
-! [si]가 UI_MAGIC(0xff)면 키입력을 받아 처리하고(kbinp) 그 외의 값이면 저장된 옵션을 처리(gotinp)한다.
+! [si]가 UI_MAGIC(0xff)면 키입력을 받아 처리하고(kbinp) 아니면 저장된 [si](default command line,external parameter의 command line)을 처리(gotinp)하고 cmdline(bx)에 넣는다. iloop를 통해 왔다면 0xff가 된다.
 input: seg es ; interactive mode ?
  cmp byte ptr (si),#0xff
  je kbinp ; yes -> get keyboard input
@@ -763,49 +764,49 @@ crnul:
 cpsav: lodsb ; copy one byte
  stosb
  or al,al ; at end ?
- jnz cpsav ; no -> go on
+ jnz cpsav ; no -> go on ; cmdline에서 lkcbuf로 복사 (null end)
 
- cmp bx,#cmdline ; empty line ?
- je notrspc ; yes -> boot first image
+ cmp bx,#cmdline ; empty line ? ; bx는 command line(DFL,ext DFL)에서 bx(cmdline)로 입력값을 저장한 크기
+ je notrspc ; yes -> boot first image ; 입력받은게 없으면 notrspc
  cmp byte ptr (bx-1),#32 ; trailing space ?
  jne notrspc ; no -> go on
- dec bx ; remove the space
+ dec bx ; remove the space ; 마지막 값이 공백인가?
  mov byte ptr (bx),al
 notrspc: mov si,#cmdline ; scan the command line for "vga=", "kbd=",
  mov di,si ; "lock" or "mem="
 chkvga:
-
+! lilo의 옵션들을  해석/처리한다.
 
 vsktnbd:
  cmp dword ptr (si),#0x64626f6e ; "nobd" ; 바이오스 데이터를 수집하지 않는다. (빠른 부팅)
  jne vsktv
  cmp byte (si+4),#32 ; terminated with SP or NUL?
  jnbe vsktv
-
+! nobd면서 다음글자가 32이하라면 nobd 플래그를 켠다.
  seg fs ; enter boot prompt ?
- or byte ptr par1_prompt+SSDIFF,#16 ; suppress BIOS data collection
+ or byte ptr par1_prompt+SSDIFF,#16 ; suppress BIOS data collection ; FLAG_NOBD
 
- jmp vskwd ; skip word
+ jmp vskwd ; skip word ; 4바이트 넘김
 
 vsktv:
  cmp dword ptr (si),#0x3d616776 ; "vga="
- jne vsktk
- call setvga ; set VGA mode
- jc near iloop ; error -> get next command
- jmp vskdb ; proceed by discarding last blank
+ jne vsktk ; "vga=" 이 아니면 skip
+ call setvga ; set VGA mode ; "vga=" 뒤의 값을 해석해서 vgaovr에 넣는다.
+ jc near iloop ; error -> get next command ; 에러나면 복귀
+ jmp vskdb ; proceed by discarding last blank ; 이미 si를 증가시켰기 때문에 si증가없이 다음 문자 처리
 vsktk:
  cmp dword ptr (si),#0x3d64626b ; "kbd="
  jne vsktl
- call putkbd ; pre-load keyboard buffer
+ call putkbd ; pre-load keyboard buffer ; 16진수 키코드(스캔코드,아스키)를 키보드 버퍼에 넣는다.
  jmp vskdb ; proceed by discarding last blank
 vsktl:
  cmp dword ptr (si),#0x6b636f6c ; "lock"
  jne vsktm
  cmp byte (si+4),#32 ; space?
  jnbe vsktm
- mov byte ptr dolock,#1 ; enable locking
+ mov byte ptr dolock,#1 ; enable locking ; lock이고 뒷글자가 32이하면 dolock=1
 vskwd: add si,#4 ; skip word
-vskdb: dec di ; discard last blank
+vskdb: dec di ; discard last blank ; 공백 쓰기용
  jmp vsknb ; continue
 vsktm:
 
@@ -814,24 +815,24 @@ vsktm:
  cmp dword ptr (si),#0x3d6d656d ; "mem="
 
  jne vsknb
- call getmem ; get the user-provided memory limit
+ call getmem ; get the user-provided memory limit ; 메모리 상한선 설정
 vsknb:
  lodsb ; copy one byte
  stosb
  cmp al,#32 ; space ?
- je chkvga ; yes -> look for options again
+ je chkvga ; yes -> look for options again ; 하나 끝. 재탐색
  or al,al ; at end ?
- jnz vsknb ; no -> go on
+ jnz vsknb ; no -> go on ; (NUL,공백이 아닌) 일반 문자열 계속 복사
  call crlf ; write CR/LF
  cmp di,#cmdline+1 ; empty line ?
-emptyl: je bfirst ; yes -> boot first image
+emptyl: je bfirst ; yes -> boot first image ; 옵션이 없으면 bfirst
  jmp bcmd ; boot the specified image
 
 ! Find the boot image and start it
 
 bcmd:
- call find_image
- jc near boot ; eureka, it was found
+ call find_image ; 이미지를 찾는다. bx에는 포인터, ax는 넘버
+ jc near boot ; eureka, it was found ; 일치하는 이미지를 찾았다.
 
  mov bx,#msg_nf ; not found -> display a message
  call say
@@ -912,16 +913,16 @@ bfcpl: lodsb ; copy one character ; 디스크립터 이름 하나만 복사?
 ! Boot the image BX points to (with password check)
 
 boot:
- mov word par2_timeout,#0xffff ; kill timeout (22.7) ; 줄지 않는 timeout 값
+ mov word par2_timeout,#0xffff ; kill timeout (22.7) ; timeout 중지 (카운트다운 되지 않음)
  mov si,#cmdline ; locate start of options
-locopt: lodsb ; 공백 다음이 null이면 공백=null
+locopt: lodsb ; 마지막이 Space,NUL이면 공백제거
  or al,al ; NUL ?
- je optfnd ; yes -> no options ; null 이면 optfnd
+ je optfnd ; yes -> no options
  cmp al,#32 ; space ?
  jne locopt ; no -> continue searching ; 공백이 나올때까지 반복
- cmp byte ptr (si),#0 ; followed by NUL ? ; 공백이면  이라인
- jne optfnd ; no -> go on ; 공백다음이 null이 아니면 패스
- mov byte ptr (si-1),#0 ; discard trailing space ; 공백 다음이 null이면 공백
+ cmp byte ptr (si),#0 ; followed by NUL ?
+ jne optfnd ; no -> go on
+ mov byte ptr (si-1),#0 ; discard trailing space ; cmdline끝 공백 제거
 optfnd: dec si ; adjust pointer
  mov options,si ; store pointer for later use
 # 1141 "second.S"
@@ -930,7 +931,7 @@ optfnd: dec si ; adjust pointer
  call vmtest ; 'vmwarn' there, is it actually virt. boot
  jnc boot9
 ; VMWARN set, and is virtual boot, so issue comment
-;;
+;; FLAG_VMWARE가 켜있고 vmware안에서 동작중
 ;; seg fs
  mov word ptr par2_timeout,#0xffff ; cancel timeout
 ;;
@@ -958,13 +959,13 @@ vmwto:
  br iloop
 
 boot9:
-
+; 패스워드 사용 체크
  test byte ptr (bx+id_flags),#128 ; use a password FLAG_PASSWORD
  jz toboot ; no -> boot
  test byte ptr (bx+id_flags),#2 ; restricted ? FLAG_RESTR
- jz dopw ; no -> get the password
+ jz dopw ; no -> get the password ; FLAG_PASSWORD & FLAG_RESTR가 켜있으면 패스워드 사용
  cmp byte ptr (si),#0 ; are there any options ?
- jne dopw ; yes -> password required
+ jne dopw ; yes -> password required ; FLAG_RESTR이 꺼있어도 si에 내용이 있다면 패스워드 사용?
 toboot: br doboot ; ...  부팅합시다~ ^^
 dopw:	;password 입력
 
@@ -1370,7 +1371,7 @@ loadlow:
 launch2:
 
  jmp launch ; go !
-! loadfile은 [map]의 index를 기반으로 sread를 이용해 SYSSEG(0x1000):0에 파일을 모두 읽어들인다. 인덱스의 마지막 주소는 다음 인덱스 섹터 주소다.
+! loadfile은 [map]의 섹터주소 배열을 기반으로 sread를 이용해 SYSSEG(0x1000):0에 파일을 모두 읽어들인다. map의 마지막은 다음 map의 섹터주소다.
 loadfile:
  push #SYSSEG ; load a file at SYSSEG:0000 ; 0x1000:0에 로드한다.
  pop es
@@ -2021,7 +2022,7 @@ kt_nowrite:
  ret
 
 ! Sector write; used for the stored command line only
-
+! 버퍼의 내용을 Default command line 섹터에 기록한다.
 cmd_write:
 ;
 ;seg fs
@@ -4215,15 +4216,15 @@ io_checksum_it:
 # 3321 "second.S" 2
 # 3336 "second.S"
 ! Put tokens into keyboard buffer
-
+! "kbd=" 다음에 오는 값을 처리한다. 이 값은 16진수 키코드이며 콤마(,)로 구분된다. 이 값은 bios 키보드 버퍼(41x)에 저장된다. 다음에 키보드 인터럽트를 통해 키입력을 받아올때 이 값이 읽혀진다.
 putkbd: add si,#4 ; skip over "kbd="
  push es
  xor ax,ax ; set ES to zero
- mov es,ax
+ mov es,ax ; es=0
 pknext: lodsb ; get next byte
  or al,al ; NUL ?
- jz pkdone ; yes -> done
- cmp al,#32 ; blank ?
+ jz pkdone ; yes -> done ; NUL이면 종료
+ cmp al,#32 ; blank ? ; 공백이어도 종료
  jne pkrd ; no -> read scan code
 pkdone: dec si ; return last character
  pop es ; done
@@ -4231,94 +4232,94 @@ pkdone: dec si ; return last character
 pkrd: xor cx,cx ; clear accumulator
 pkrdlp: cmp al,#97 ; lower case character ?
  jb pknol ; no -> go on
- sub al,#32 ; make upper case
-pknol: sub al,#48 ; normalize
+ sub al,#32 ; make upper case ; 대문자화
+pknol: sub al,#48 ; normalize ; 0x30 ='0'
  cmp al,#10 ; >"9" ?
- jb pkok ; no -> okay
+ jb pkok ; no -> okay ; 10보다 작으면 ok. -> pkok
  cmp al,#17 ; <"A" ?
- jb pksyn ; yes -> syntax error
- sub al,#7 ; adjust
+ jb pksyn ; yes -> syntax error ; 10이상 A미만이면 에러출력후 정리하고 리턴
+ sub al,#7 ; adjust ; 16진수화
  cmp al,#16 ; >"F" ?
- jae pksyn ; yes -> syntax error
+ jae pksyn ; yes -> syntax error ; 16진수 초과시 역시 에러출력후 종료
 pkok: shl cx,1 ; shift CX
  jc pksyn ; carry means trouble
  shl cx,1
  jc pksyn
  shl cx,1
  jc pksyn
- shl cx,1
- jc pksyn
+ shl cx,1 ; 4비트 shift (16진수 한글자)
+ jc pksyn ; 도중에 에러가 있으면 에러출력후 리턴
  add cl,al ; put in lowest nibble
  lodsb ; get next byte
  or al,al ; NUL ?
- jz pkend ; yes -> at end
+ jz pkend ; yes -> at end ; 끝(Null)이면 키보드 버퍼에 저장하고 리턴
  cmp al,#32 ; space ?
- je pkend ; yes -> at end
+ je pkend ; yes -> at end ; space도 마찬가지
  cmp al,#44 ; comma ?
- je pkmore ; yes -> end of token
- jmp pkrdlp ; token continues
+ je pkmore ; yes -> end of token ; 콤마면 저장하고 다음 값을 계속 읽는다.
+ jmp pkrdlp ; token continues ; 
 pksyn: mov bx,#msg_pks ; complain
  call say
 pkfls: lodsb ; flush to end of option
  or al,al
  jz pkdone
  cmp al,#32
- je pkdone
+ je pkdone ; 다음 파싱할것(NUL,SP)까지 si를 증가한후 리턴한다. 
  jmp pkfls
 pkend: call pkput ; store token
  jmp pkdone ; ... and return
 pkmore: call pkput ; store token
  jmp pknext ; handle next token
 pkput: seg es ; get buffer pointer
- mov bx,[KBEND]
+ mov bx,[KBEND] ; 0x41c ==tail
  mov dx,bx
  add dx,#2 ; increment it
- cmp dx,#KBHIGH ; (wrap around end)
+ cmp dx,#KBHIGH ; (wrap around end) ; KBHIGH==0x3E. 키보드버퍼의 끝은 0x3D다. 0x3E보다 작아야한다.
  jb pknadj
- mov dx,#KBLOW
+ mov dx,#KBLOW ; 초과하면 버퍼의 시작(KBLOW==0x1E)
 pknadj: seg es ; buffer full ?
- cmp dx,[KBBEG]
- je pkfull ; yes -> error
+ cmp dx,[KBBEG] ; 0x41a head. 가장 오래된 키를 가지고 있다.
+ je pkfull ; yes -> error ; 이 값이 tail과 같으면 현재 키버퍼에 키가 없는걸 나타낸다. 꽉찼으면 에러출력, 비우고 리턴
  seg es ; store scan code
- mov (bx+0x400),cx
+ mov (bx+0x400),cx ; 키 코드 저장
  seg es ; store new pointer
- mov [KBEND],dx
+ mov [KBEND],dx ; tail을 증가시킨다.
  ret ; done
-pkfull: mov bx,#msg_pkf ; complain
+pkfull: mov bx,#msg_pkf ; complain ; 꽉찼다고 출력
  call say
  pop ax ; discard return address
  jmp pkfls ; abort
 
 ! Set VGA mode
-
+! lilo는 normal(80x25), extended(ext:80x50), ask(부팅시 입력),숫자입력 모드를 지원한다.
 setvga: add si,#4 ; skip over "vga="
  push si ; save SI
  mov bx,#vgatab ; scan VGA table
-svgatb: pop si ; get pointer to option value
+svgatb: pop si ; get pointer to option value ; si는 vga 다음값
  push si
  mov cx,(bx) ; get VGA code
  or cx,cx ; at end ?
- jz vganum ; yes -> must be numeric
- inc bx ; compare the strings
+ jz vganum ; yes -> must be numeric ; 끝이면(매치되는 문자열이 없으면) 숫자입력
+ inc bx ; compare the strings ; vga코드는 건너뛴다.
  inc bx
 vgacmp: lodsb
  call upcase ; (case-insensitive)
  mov ah,(bx)
  inc bx
  or ah,ah ; at end ?
- jnz vgamore ; no -> go on
+ jnz vgamore ; no -> go on ; VGA table entry의 문자열 끝이 아니면 vgamore로 계속된다.
  or al,al ; at end of line ?
- jz vgafnd ; yes -> found it
+ jz vgafnd ; yes -> found it ; command line 끝이면 리턴
  cmp al,#32 ; space ?
- je vgafnd ; yes -> found it
- jmp svgatb ; try next entry otherwise
+ je vgafnd ; yes -> found it ; vga=xxx처리중 공백을 만났으면 리턴
+ jmp svgatb ; try next entry otherwise ; VGA table의 한 entry이면 다음 entry를 읽는다.
 vgamore: cmp al,ah
- je vgacmp ; equal -> next character
+ je vgacmp ; equal -> next character ; command line의 vga=<xxxx>와 VGA table의 문자열값이 같으면 계속 비교
 vgaskp: mov al,(bx) ; skip to end of reference string
  inc bx
  or al,al
- jnz vgaskp
- jmp svgatb ; try next entry
+ jnz vgaskp ; 문자열이 다르다. 이 entry는 넘긴다.
+ jmp svgatb ; try next entry ; 다음 entry 검사
 vgafnd: pop ax ; drop SI
 
 vgaput: dec si ; read last character again
@@ -4327,19 +4328,19 @@ vgaput1: mov vgaovr,cx ; set VGA mode
  ret
 
 vganum: pop si ; get SI
-
+! SI에서 문자열을 읽어서 바이너리 값으로 변환하고 결과는 cx에 들어간다.
  call strtoul
- jc vgaerr
+ jc vgaerr ; 변환 에러
  mov cx,ax
  or dx,dx
- jnz vgaerr
- jmp vgaput1
+ jnz vgaerr ; 결과값이 ax를 초과하면 에러 출력
+ jmp vgaput1 ; 변환된 값을 vgaovr에 넣고 리턴한다.
 # 3476 "second.S"
 vgaerr: mov bx,#msg_v ; display an error message
  call say
 
  xor eax,eax
- mov dword ptr [hma],eax
+ mov dword ptr [hma],eax ; vga에러면 hma=0
 
  stc ; return an error
  ret
@@ -4364,17 +4365,17 @@ vgatab:
 
 ! get numeric string suffixed with "KkMmGg"
 ! updates SI
-! 단위를 바꿔준다. 기본단위는 kilo
+! M,G등을 바꿔준다. 기본단위는 kilo
 get_K:
  push cx ; save CX
 
- call strtoull ; get number in DX:AX
- jc gmthis2 ; signal conversion error
+ call strtoull ; get number in DX:AX ; 문자열을 바이너리 숫자로 변환
+ jc gmthis2 ; signal conversion error ; 에러 & 리턴
 
  mov bl,(si) ; get next character
  or bl,#0x20 ; convert to lower case
  cmp bl,#0x6b ; 'K' or 'k' ?
- je gmthis ; yes -> do not change
+ je gmthis ; yes -> do not change ; 노 에러 & 리턴
 
  mov cx,#20 ; divide or multiply by 2^20
  cmp bl,#0x67 ; 'G' or 'g' ?
@@ -4388,13 +4389,13 @@ get_K:
  dec si ; will increment later
 
 gmdivl:
- shr eax,cl ; shift by CL
+ shr eax,cl ; shift by CL ; 언급이 없으면 byte라 kilo에서 10번 >>
  jmp gmthis ; done
 gmmul:
 gmmull:
  shl eax,1 ; shift by 1 each time
  jc gmvbig ; very big if overflow
- loop gmmull ; ten times
+ loop gmmull ; ten times ; 단위만큼 shift해서 올린다.
 
 ! exit with no error
 
@@ -4413,27 +4414,27 @@ gmvbig:
 
 
 ! Set memory limit
-
+! 메모리 상한선을 파싱해서 hma에 세팅하고 커널 파라미터에도 복사한다. 이미 세팅되어 있다면 복사하지 않는다.
 getmem:
  push si ; save SI for copying
- add si,#4 ; advance to number?
- call get_K ; bl=다음값
+ add si,#4 ; advance to number? ; "mem=" 다음 문자
+ call get_K ; bl=다음값 ; 숫자를 분석해서 단위까지 계산한다. eax에 size가 들어간다.
  jc gmcopy ; error, just copy it
 
  cmp bl,#0x40 ; is it '@'
  jne gm22
 ! <size>@<start> format (2.4 kernels)
- push eax ; save size
- inc si ; skip '@'
- call get_K
+ push eax ; save size ; 값 저장
+ inc si ; skip '@' ; @면 다음 숫자를 한번 더 해석한다.
+ call get_K ; eax=start
  pop edx ; restore size
  jc memerr
- cmp eax,#1024 ; start : 1meg
+ cmp eax,#1024 ; start : 1meg ; start가 1M보다 크면 복사
  ja gmcopy ; just copy if above
  add eax,edx ; EAX = hma/1024
- cmp eax,#2048 ; high : 2meg
+ cmp eax,#2048 ; high : 2meg ; size+start가 2048이하면 복사
  jbe gmcopy
-gm22:
+gm22: ; start가 1024 이하면서 size+start는 2048보다 크다.
  or bl,#0x20
  cmp bl,#0x20 ; NUL or SPACE
 
@@ -4442,11 +4443,11 @@ gm22:
  jne gmcopy ; allow <size>#<start> and <size>$<start>
 
  cmp dword ptr [hma],#0 ; set already?
- jne gmnocopy
+ jne gmnocopy ; 이미 값이 세팅됐으면 복사안함
  mov dword ptr [hma],eax ; set it
-gmcopy: pop si
+gmcopy: pop si ; kernel쪽 파라미터에 복사
 gmret: ret
-gmnocopy: pop bx
+gmnocopy: pop bx ; 파싱한mem=xxx부분을 복사하지 않는다.
  ret
 
 
@@ -4461,55 +4462,55 @@ strtoull: ; numeric conversion to EAX
  push ax
  pop eax
  ret
-
+! 10진수 or 16진수 ascii 문자열을 binary값으로 변환. 에러나면 carry=1로 리턴한다. 결과값은 dx와 ax에 저장된다.
 strtoul:
  xor ax,ax
  xor dx,dx
- mov cx,#10 ; default radix is decimal
+ mov cx,#10 ; default radix is decimal ; 10의 기수는 10
  cmp byte ptr (si),#0x39
  ja s2lbad ; error if > '9'
  cmp byte ptr (si),#0x30 ; == '0'?
  jb s2lbad ; error if < '0'
- jne s2lnext
- inc si
+ jne s2lnext ; 1~9면 다음으로 넘어간다.
+ inc si ; 0으로 시작하면 다음글자
  dec cx
- dec cx ; assume octal : CX = 8
+ dec cx ; assume octal : CX = 8 ; 0으로 시작하면 8진수
 
  cmp byte ptr (si),#0x58 ; == 'X'?
  je s2lhex
  cmp byte ptr (si),#0x78 ; == 'x'?
- jne s2lnext
-s2lhex: add cx,cx ; it is hexadecimal
- inc si
+ jne s2lnext ; 그냥 0이면 8진수로 s2lnext로 넘어간다.
+s2lhex: add cx,cx ; it is hexadecimal ; 0x or 0X면 16진수. 기수=16
+ inc si ; x 넘김
 s2lnext:
-        xor bx,bx
-        mov bl,(si) ; get next character
+ xor bx,bx
+ mov bl,(si) ; get next character
 
- or bl,#0x20 ; convert to lower case
+ or bl,#0x20 ; convert to lower case ; 0x20을 켜면 무조건 소문자 a(0x41)->A(0x61)
  sub bl,#0x30 ; - '0'
- jb s2ldone
+ jb s2ldone ; 0x30보다 작은 수면 기호나 특수문자(NUL,space 포함). 변환완료
  cmp bl,cl ; compare to radix
- jb s2lmul
- add bl,#0x30-0x61+10
+ jb s2lmul ; 기수보다 작으면 패스
+ add bl,#0x30-0x61+10 ; 기수보다 크다. 16진수면서 A-F다. 더해서 10-15로 변환
  cmp bl,cl ; compare to radix
- jnb s2ldone
+ jnb s2ldone ; F가 넘어가는 문자면 변환종료(carry=0)
 s2lmul:
-        push dx ; save high order
- mul cx ; multiply by radix
- add ax,bx
+ push dx ; save high order
+ mul cx ; multiply by radix ; ax에 기수를 곱해 한자리 올린다.
+ add ax,bx ; 맞는 자리에 수를 더한다.
  adc dx,#0 ; carry possible only in radix 10
  pop bx
  push dx
- xchg ax,bx
- mul cx
+ xchg ax,bx ; 하위 자리는 bx에 상위는 ax에 들어간다.
+ mul cx ; 상위 자릿수에 기수를 곱한다.
  or dx,dx
- jnz s2lbad
+ jnz s2lbad ; 상위자리까지 초과했으면 error
  pop dx
- add dx,ax
- jc s2lbad
- xchg ax,bx
+ add dx,ax ; 상위 자리끼리 더한다.
+ jc s2lbad ; 넘치면 error
+ xchg ax,bx ; 아랫자리 복구
  inc si
- jmp s2lnext
+ jmp s2lnext ; 다음글자를 읽는다.
 
 s2lbad:
  stc
@@ -4535,24 +4536,24 @@ s2ldone:
 ; Carry SET
 ; AX==#image
 ; BX==pointer to descriptor
-;
-;
+! IMAGES_numerator = SECTOR_SIZE_asm*MAX_DESCR_SECS_asm - 4 - 1
+! IMAGES = IMAGES_numerator / id_size ; id_size==54??
 ; side effect:
 ; The selected image is hi-lited if the menu is displayed
-;
+; n번째 디스크립터 포인터를 push/pop해서 부팅할 곳 기억. ax에는 디스크립터 넘버. bx에 부팅할 디스크립터를 리턴한다.
 find_image:
  push cx
  push si
  push di
 
- mov cx,#IMAGES ; test all names
- mov si,#DESCR0
+ mov cx,#IMAGES ; test all names ; 이미지가 들어갈수 있는 최대 숫자 (카운터)
+ mov si,#DESCR0 ; 디스크립터 영역
  xor bx,bx ; clear BX
  push si
 
 fi_nextn:
  mov di,#cmdline
- test byte ptr (si),#0xFF ; null descriptor at end
+ test byte ptr (si),#0xFF ; null descriptor at end ; 디스크립터 끝이면 리턴
  jz fi_nomore
 
 fi_nextc:
@@ -4566,24 +4567,24 @@ fi_nextc:
  inc di
 
  call upcase
-
+! ah=디스크립터 이름 al=cmdline 커널이름
  or al,al ; NUL in command line
  je fi_pmat
  cmp al,#32 ; SPACE in command line
  jne fi_cmp
 
 ; have partial match, set BX conditionally
-fi_pmat:
+fi_pmat: ; cmdline 이름이 NUL 혹은 공백
  or ah,ah ; NUL in descriptor name
- jz fi_found ; EXACT match found
-
- test byte ptr par2_flag2,#4 ; (22.7)
- jnz fi_skipn ; no partial match if unattended
+ jz fi_found ; EXACT match found ; 디스크립터의 이름도 끝이면 찾았다.
+; 부분 일치할때 처리
+ test byte ptr par2_flag2,#4 ; (22.7) ; FLAG2_UNATTENDED
+ jnz fi_skipn ; no partial match if unattended ; unattended가 켜있으면 패스
 
  or bx,bx
- jnz fi_skipn ; already set
+ jnz fi_skipn ; already set ; 디스크립터 포인터가 세팅돼있으면 패스
  pop bx
- push bx
+ push bx ; 부분 일치하는 부분을 기억한다.
  jmp fi_skipn ; go to next
 
 fi_cmp:
@@ -4593,7 +4594,7 @@ fi_cmp:
 ; advance to next descriptor
 fi_skipn:
  pop si
- add si,#id_size ; test next name
+ add si,#id_size ; test next name ; 다음 디스크립터 포인터를 push
  push si
  loop fi_nextn
 
@@ -4621,7 +4622,7 @@ fi_fuzzy:
  sub ax,#DESCR0
  mov cl,#id_size
  div cl
- cbw
+ cbw ; ax=n번째
 # 3786 "second.S"
  stc
  jmp fi_exit
@@ -4800,7 +4801,7 @@ acmdbeg: .ascii "auto "
 mcmdbeg: .ascii "BOOT_IMAGE"
 prechr: .byte 32 ; space: guard double blank supression
     ; equal sign: variable assignment
-cmdline: .byte 0 ; Map을 사용하지 않을때는 Map의 공간을 cmdline으로 사용할 수 있다. 최소 512bytes(섹터크기)이상
+cmdline: .byte 0 ; Map을 사용하지 않을때는 Map의 공간을 cmdline으로 사용할 수 있다. 최소 512bytes(섹터크기)이상. lkwbuf와 lkcbuf는 Map과 Dflcmd와 겹칠수 있다.
 
 
 
@@ -4819,10 +4820,10 @@ theends = the_end1/512	! theends = theend의 섹터크기 ; 코드끝까지 섹�
  .align 512		! 섹터단위 정렬 ; max_secondary는 코드&데이터부분 다음 섹터에 위치한다.
 max_secondary:	
 # 4140 "second.S"	! max_seocndary = theend 다음 섹터
-Map = max_secondary + 512	! Map = max_secondary + 1 (sector) menu일때 20번째 섹터
-Dflcmd = Map + 512			! Dflcmd = max_secondary + 2
+Map = max_secondary + 512	! Map = max_secondary + 1 (sector) menu일때 20번째 섹터 ; 섹터주소로 이루어진 배열(map)을 읽을 용도로 쓰인다.
+Dflcmd = Map + 512			! Dflcmd = max_secondary + 2 ; Default command line 버퍼. 다른 섹터 로드용으로도 쓰인다.
 Map2 = Dflcmd				! Map2 = max_secondary + 2
-Keytable = Dflcmd + 512 	! Keytable = max_secondary + 3
+Keytable = Dflcmd + 512 	! Keytable = max_secondary + 3 ; 맨 처음 읽는 Keytable 섹터. 256바이트 이후엔 Menutable영역이 있다.
 Descr = Keytable + 512		! Descr = max_secondary + 4
 ParmBSS = Descr + 512*MAX_DESCR_SECS_asm ! ParmBSS = max_secondary + 7
 

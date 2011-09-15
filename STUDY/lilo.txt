@@ -1,0 +1,41 @@
+first는 제한된 MBR 영역에 들어가기 때문에 속도보다 명령어 크기를 줄이는데 신경을 많이 쓰고 있다.
+lilo는 섹터주소가 배열로 이루어진 map(index sector)를 읽어들인다.
+하지만 second stage map과 kernep map은 섹터주소 길이(4,5)와 구성에 차이가 있다.
+
+lilo에는 first second, third가 있다.
+
+디스크립터란.....
+
+키테이블에는 menutable 구조체가 있다.
+
+매핑용 볼륨 테이블을 만든다. 결과는 devmap,vtab,rtab등에 들어간다.
+devmap는 logical:physical 형태로 이루어진다.
+vtab, rtab에는 연결된 하드의 raid_offset이 들어가고 rmask는 해당 하드가 레이드인지 비트
+    로 표시한다.
+
+map의 구조는...
+
+싱글키....
+
+DFL+2 or external parameter command line 사용 -> cmdline 복사
+cmdline->lilo에서 파싱할수 있는것 하고 삭제
+
+nobd
+
+kbd= 옵션은 16진수. 키코드값. 키보드 버퍼에 바로 쓴다.
+
+cmdbeg=
+
+lock=f4f2?
+
+cmdbeg , cmdline, optsect -> parmline (kernel)
+
+hma=
+
+매직코드 보통 null end
+
+chs방식
+
+load 구조
+
+0x60 - 리로
