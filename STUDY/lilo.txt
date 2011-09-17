@@ -5,7 +5,7 @@ lilo는 first와 second 두 단계가 있습니다.
 x86 8차에서 분석한건 second.S가 전처리되어 나오는 text 방식의 second.s입니다.
 
 first는 제한된 MBR 공간 때문에 속도보다 명령어 크기를 줄이는데 신경을 쓰고 있습니다.
-처음에 0x7c0에서 시작하며 dl에는 드라이브 번호가 넘어옵니다. 0=floppy.... 0x80=첫번째 하드 0x81=두번째 하드....
+메모리 0x7c00에서 시작하며 dl에는 드라이브 번호가 넘어옵니다. 0=floppy.... 0x80=첫번째 하드 0x81=두번째 하드....
 
 first 단계에서는 간단한 체크와 함께 "LILO" 문자열의 "LI"를 출력하고 second를 읽어와 second로 넘어갑니다.
 second를 로드할때 먼저 second의 섹터주소들이 모여있는 index sector(map)를 읽어온후 이 배열을 이용해 second를 읽어들입니다.
@@ -60,8 +60,9 @@ Second code [18] // text방식이면 14, menu면 18
 Second index sector [1]
 Fallback sector [1]
 Option sector [1]
+
 Bootsect [1]
 Setup code
 Kernel
 
-
+Keyboard translation table & MENUTABLE [1]
