@@ -639,7 +639,7 @@ niloop: ; ES may point to external params ; no input loop? ; si!=0로 넘어오�
  mov bx,#msg_p ; display boot prompt ; "boot: " 문자열 출력
  call say
  mov bx,#cmdline ; move cursor to the end of the line
-clend: mov al,(bx) ; cmdline의 옵션 출력
+clend: mov al,(bx) ; cmdline의 내용 출력
  or al,al ; at end ?
  jz cledne ; yes -> go on
  push bx ; display the character

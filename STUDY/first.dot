@@ -1,45 +1,45 @@
 digraph first {
-size="7,7";
+size="6,8";
 _main [shape=ellipse,label="First stage"];
 node [shape=box];
-_main->start [label="데이터 너머로 점프"];
-start [label="스택 설정\npush external parameters"]; // 스택=0x7c0:2048
+_main->start [label="데이터 영역 점프"];
+start [label="스택 설정\nexternal parameters 저장"]; // 스택=0x7c0:2048
 start->video_on;
 video_on [label="enable video"];
 video_on->prtL; 
-prtL [label="CR,LF,\"L\" 출력"];
+prtL [label="CR/LF와 \"L\" 출력"];
 prtL->lagain;
-lagain [shape=diamond,label="external parameter\n사용?"];
+lagain [shape=diamond,label="external parameter가\n있는가?"];
 lagain->boot_in_dl [label="No"];
 lagain->yes_extp [label="Yes",style=dotted];
-yes_extp [label="dl=external parameter\n하드번호(dh)"];
+yes_extp [label="external parameter\n하드번호 사용"];
 yes_extp->boot_in_dl [style=dotted];
-boot_in_dl [label="map buffer=0x7E00"];
+boot_in_dl [label="디스크 버퍼로\nFirst뒤 사용"]; // MBR을 읽거나 index sector를 읽는다.
 boot_in_dl-> map_on_boot;
-map_on_boot [shape=diamond,label="FLAG_MAP_ON_BOOT?\n(raid시 on)"]; //FLAG_MAP_ON_BOOT
-map_on_boot->use_boot [label="On",style=dotted];
-map_on_boot->use_installed [label="Off"];
+map_on_boot [shape=diamond,label="map파일이 부팅된\n디스크에 있는가?\n(raid시 on)"]; //FLAG_MAP_ON_BOOT
+map_on_boot->use_boot [label="Yes",style=dotted];
+map_on_boot->use_installed [label="No"];
 use_installed [label="하드수를 구한다"]
 use_installed->error [label="error",style=dotted];
 use_installed->vagain;
 vagain [label="저장된 volumeID와\n일치하는 하드를 찾는다.\n(count=하드수)"];
 vagain->use_boot [label="found it"];
 vagain->not_found [style=dotted,label="not found"];
-not_found [label="하드번호(dl) 복원"];
+not_found [label="부팅시 넘어온\n하드번호 사용"];
 not_found->use_boot [style=dotted];
-use_boot [label="second stage\nindex(map)를 읽어온다."]
+use_boot [label="second stage index\n(섹터주소)를 읽어온다."]
 use_boot->sload;
-sload [label="buffer=0x8800\nsecond stage를 로드한다."];
+sload [label="first뒤 버퍼,스택 너머에\nsecond stage를 로드한다."];
 sload->chk_sig;
-chk_sig [label="signature, version\nmapstamp,stage 검사",shape=diamond];
-chk_sig->prtI [label="OK"];
-chk_sig->error [label="wrong",style=dotted];
+chk_sig [label="signature, version\nmapstamp, stage가\n일치하는가?",shape=diamond];
+chk_sig->prtI [label="Yes"];
+chk_sig->error [label="No",style=dotted];
 prtI [label="\"I\" 출력"];
 prtI->second
 second [shape=ellipse,label="Second stage!"];
-error[label="공백,에러코드(ah) 출력\ncount(250)감소"];
+error[label="공백,에러코드 출력\ncount(250)감소"];
 {rank=same;sload error}
-error->lagain [label="jump"];
+error->lagain [style=dotted];
 error->zzz [label="count==0",style=dotted];
 zzz [label="halt 무한루프"];
 }

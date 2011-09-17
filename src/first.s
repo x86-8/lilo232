@@ -283,7 +283,7 @@ vagain:
  je vol_found	! 일치하는 volumeID를 찾았다
  loop vagain ! 시스템의 하드수 만큼 반복
 
- pop dx ! restore specified BIOS code ! 찾지 못했다면 DL 복구, dh=map의 하드번호, dl=부팅된 하드 혹은 external parameter 하드번호
+ pop dx ! restore specified BIOS code ! 찾지 못했다면 부팅시 넘어온 DL 복구, dl=부팅된 하드 혹은 external parameter 하드번호
     ! AX and DX are identical at this point
 
 vol_found:
@@ -294,7 +294,7 @@ use_boot:
  push bx ! save map2 for later ; 0x7c0:200
 
  mov dh,[d_flag](bp) ! get device flags to DH ! 0x60=EDD, 0x40=disk_convert, 0 = disk_geometry(CHS) ; 디스크 플래그를 넣는다. disk_read가 이 값을 참조한다.
- mov si,#d_addr	! [ds:si]== 인덱스 섹터(second 섹터주소값의 배열)의 섹터주소
+ mov si,#d_addr	! [ds:si]는 second의 섹터주소들이 담긴 인덱스 섹터의 섹터주소다
  call pread ! increments BX +512(섹터값) ; 인덱스 섹터를 읽는다.
 
  mov ah,#0x99 ! possible error code
