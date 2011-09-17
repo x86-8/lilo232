@@ -160,7 +160,7 @@ flag2: .byte 0 ; second stage specific flags
  .align 16
 
 gdt: ; space for BIOS
- .blkb 0x10
+ .blkb 0x10 ; 디스크립터 크기는 8바이트다. dummy(0), GDT data segment location(0)는 패스
  ; source
  .word 0xffff ; no limits
  .byte 0
@@ -247,7 +247,7 @@ comcom:
  seg es ; patch number of sectors
 
  mov byte ptr (di-8),#18	; SPT(파라미터+4 == 끝-8)에 18을 넣는다. 
-! 3.5인치 720k와 1.44M은 섹터크기가 각각 9, 18이다. 18을 넣어주는것은 이와 관련있지 않을까 추측한다.
+! 3.5인치 720k와 1.44M은 섹터크기가 각각 9, 18이다. 이와 관련있지 않을까 추측한다.
 ! 섹터크기가 9이하라면 디스크 상태가 이상한게 아니냐는 추측도 있었다.
 
  push #0
@@ -518,7 +518,7 @@ atbol:
 ! 입력받기전 세팅
 dokay: mov bx,#ospc ; display 'O ' ; LIL까지 출력되었고 "O 23.2" 를 출력. o+space?
  call say
-
+! 초기화
  xor eax,eax
  mov dword ptr [hma],eax ; HMA=0
 
@@ -758,7 +758,7 @@ crnul:
  xor al,al ; mark end
  mov (bx),al
  mov si,#cmdline ; copy command line to save buffer
- mov di,#lkcbuf
+ mov di,#lkcbuf ; lkcbuf에는 lilo옵션 빼고 저장된다.
  mov byte ptr dolock,#0 ; disable locking
 
 cpsav: lodsb ; copy one byte
@@ -915,16 +915,16 @@ bfcpl: lodsb ; copy one character ; 디스크립터 이름 하나만 복사?
 boot:
  mov word par2_timeout,#0xffff ; kill timeout (22.7) ; timeout 중지 (카운트다운 되지 않음)
  mov si,#cmdline ; locate start of options
-locopt: lodsb ; 마지막이 Space,NUL이면 공백제거
+locopt: lodsb ; 이미지 이름 뒤 옵션에 포인터 위치시킨다.
  or al,al ; NUL ?
- je optfnd ; yes -> no options
+ je optfnd ; yes -> no options ; 공백없이 NUL이면 패스
  cmp al,#32 ; space ?
  jne locopt ; no -> continue searching ; 공백이 나올때까지 반복
  cmp byte ptr (si),#0 ; followed by NUL ?
  jne optfnd ; no -> go on
- mov byte ptr (si-1),#0 ; discard trailing space ; cmdline끝 공백 제거
+ mov byte ptr (si-1),#0 ; discard trailing space ; 첫 공백후 끝(NUL)이면 공백 제거
 optfnd: dec si ; adjust pointer
- mov options,si ; store pointer for later use
+ mov options,si ; store pointer for later use ; 커널 이미지 이름을 제외한 옵션부 혹은 NUL
 # 1141 "second.S"
  test word ptr [id_flags](bx),#1024 ; #FLAG_VMWARN
  jz boot9
@@ -961,13 +961,13 @@ vmwto:
 boot9:
 ; 패스워드 사용 체크
  test byte ptr (bx+id_flags),#128 ; use a password FLAG_PASSWORD
- jz toboot ; no -> boot
+ jz toboot ; no -> boot ; PASSWORD off 면 노 패스워드
  test byte ptr (bx+id_flags),#2 ; restricted ? FLAG_RESTR
- jz dopw ; no -> get the password ; FLAG_PASSWORD & FLAG_RESTR가 켜있으면 패스워드 사용
+ jz dopw ; no -> get the password ; PASSWORD on, RESTR off 면 패스워드 사용
  cmp byte ptr (si),#0 ; are there any options ?
- jne dopw ; yes -> password required ; FLAG_RESTR이 꺼있어도 si에 내용이 있다면 패스워드 사용?
-toboot: br doboot ; ...  부팅합시다~ ^^
-dopw:	;password 입력
+ jne dopw ; yes -> password required ; PASSWORD on, RESTR on, 옵션있음 이면 패스워드 사용
+toboot: br doboot ; ...  ; 둘다 켜있고 옵션 없으면 노 패스워드 ; 부팅합시다~ ^^
+dopw:  ;password 입력
 
  push bx ; save the image descriptor
 ;;
@@ -978,15 +978,15 @@ dopw:	;password 입력
  call say
 
  push bp ; save BP
- mov bp,sp ; save SP in BP
- sub sp,#CL_LENGTH ; allocate space for PW string
+ mov bp,sp ; save SP in BP ; 스택프레임 생성
+ sub sp,#CL_LENGTH ; allocate space for PW string ; 공간 확보
  mov si,sp ; si points at string
  xor di,di ; di counts characters
 pwloop:	   
 # 1209 "second.S"
- mov cx,#pwtime ; get timeout exit
+ mov cx,#pwtime ; get timeout exit ; 입력시간 종료 루틴
  call getkey
-
+; 패스워드 키입력 처리 부분
  cmp al,#13 ; CR ?
  je pwcr ; yes -> handle it
  cmp al,#21 ; ^U ?
@@ -999,28 +999,28 @@ pwloop:
  je pwdelch
  ja pwloop ; ignore other non-printable characters
  cmp al,#32
- jb pwloop
-
+ jb pwloop ; 출력불가능한 문자 무시
+! 32<문자<127 처리
  cmp di,#CL_LENGTH ; check for buffer overflow
- jae pwloop ; ingnore further input
+ jae pwloop ; ingnore further input ; 넘치는 입력 무시
  seg ss
- mov (si),al ; store char in buffer
- inc si
- inc di
- mov al,#42 ; echo '*'
+ mov (si),al ; store char in buffer ; 버퍼에 저장
+ inc si ; 포인터 위치 증가
+ inc di ; 문자 카운터 증가
+ mov al,#42 ; echo '*' ; 출력은 *****
  call display
  jmp pwloop ; loop back for more
 
 pwdelch: or di,di
- jz pwloop
- call pwbs
+ jz pwloop ; 처음이면 스킵
+ call pwbs ; 한글자 삭제
  dec si
  dec di
  jmp pwloop
 
-pwdell: inc di
+pwdell: inc di ; 카운터, 포인터, 화면출력/위치 초기화
 pwdel: dec di
- jz pwloop
+ jz pwloop ; 문자 카운터가 0이 될때까지 삭제
  call pwbs
  dec si
  jmp pwdel
@@ -1030,8 +1030,8 @@ pwbs: mov bx,#bs
  ret
 
 pwcr:
- xor cx,cx ; signal okay
-pwtime: ; CX != 0 if enter here
+ xor cx,cx ; signal okay ; enter를 눌러 들어왔다면 0
+pwtime: ; CX != 0 if enter here ; timeout으로 들어왔다면 0이 아니다.
  inc cx
  call crlf
 
@@ -1042,13 +1042,13 @@ pwtime: ; CX != 0 if enter here
 ; SS:SI is the password string
  push di
  push si
- call _shsInit
+ call _shsInit ; 초기값 세팅
  call _shsUpdate
  call _shsFinal
  mov bx,(bp+2) ; restore image descriptor pointer
  lea di,(bx+id_password_crc)
  mov si,#shs_digest
- mov cx,#5*4
+ mov cx,#5*4 ; 160 bits
 ; ES==DS
  repe
      cmpsb
@@ -1058,8 +1058,8 @@ pwtime: ; CX != 0 if enter here
  push ss
  pop es ; ES=SS
 
- je pwcleanup ; CX will be 0
- inc cx ; CX is > 0
+ je pwcleanup ; CX will be 0 ; 문자열 비교에서 끝까지 일치하면 cx=0, pwcleanup으로 점프
+ inc cx ; CX is > 0 ; 패스워드 불일치
 
 
 pwcleanup:
@@ -1067,7 +1067,7 @@ pwcleanup:
  mov cx,#CL_LENGTH
  mov di,si
  xor ax,ax
- rep ; wipe out password in memory
+ rep ; wipe out password in memory ; 메모리 상의 패스워드 문자열 0으로 초기화
      stosb
  pop cx
  pop es ; restore the saved ES
@@ -1079,27 +1079,27 @@ pwcleanup:
  jz doboot
 ; fall into pwfail
 # 1419 "second.S"
-pwfail: mov bx,#msg_pf ; display an error message
+pwfail: mov bx,#msg_pf ; display an error message ; cx>0 이면 패스워드 불일치
  call say
  br iloop ; get next input
 
 ! Boot the image BX points to
 
-doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
+doboot: mov byte ptr prechr,#61 ; switch to equal sign "=" ; "BOOT_IMAGE=커널명"
  push bx ; save image descr
  mov bx,#msg_l ; say hi "Loading "
  call say
  pop bx ; display the image name
  push bx
- call say ; 리눅스 이미지 이름 출력
+ call say ; 커널 이미지 이름 출력
  pop si
 
- push si
+ push si ; 부팅할 이미지 이름부분 저장
  add si,#id_start ; form address ; [si+id_start]==커널 이미지 섹터 주소
 
 ; Now load the kernel sectors
  xor ax,ax
- mov word ptr (gdt+0x1b),ax ; set GDT to "load low" ; gdt 일부분 초기화
+ mov word ptr (gdt+0x1b),ax ; set GDT to "load low" ; 메모리 복사할 곳 초기화. 주소는 0x1a부터 시작한다.
  mov byte ptr (gdt+0x1f),al
  mov moff,ax ; map is not loaded yet ; map offset ; map에 쓰이는 오프셋값 초기화
 
@@ -1109,7 +1109,7 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
  xchg dx,ax
  lodsb
 
- push si ; save SI
+ push si ; save SI ; id_start 다음 id_flags의 위치 저장
 
 
 
@@ -1135,17 +1135,17 @@ doboot: mov byte ptr prechr,#61 ; switch to equal sign "="
  call cread ; DFLcmd를 읽어온다.
  push word ptr (Dflcmd) ; push magic number
  mov bx,#Dflcmd ; load the fallback sector
- call load1 ; 폴백 섹터(1sector)를 읽어온다.
+ call load1 ; fallback 섹터(1sector)를 읽어온다.
  pop ax ; valid magic number ?
 
- cmp ax,#0xf4f2 ; default command line 매직넘버
+ cmp ax,#0xf4f2 ; DFL의 매직넘버. 써도 되는지 확인
  je dclok ; yes -> can write
- cmp ax,#0x6b6d ; mk
+ cmp ax,#0x6b6d ; 혹은 mk라면 dclok로 간다.
  jne nofbck ; invalid -> must not write
 dclok: mov bx,#Dflcmd ; fallback data present ? ; 6b6d면 bx=dflcmd
- cmp word ptr (bx),#0xf4f2
+ cmp word ptr (bx),#0xf4f2 ; fallback의 매직넘버. fallback이 있다면 fallback을 default command line 섹터에 쓴다.
  jne nofbck ; no -> go on
- call cmd_write ; write out the command line ; 0xf4f2면 로드한 폴백을 dflcmd 섹터에 쓴다.
+ call cmd_write ; write out the command line
 nofbck:
 
 
@@ -1153,59 +1153,59 @@ nofbck:
 
 
  mov bx,#Dflcmd ; load the options sector
- call load1 ; [map]의 두번째 섹터(옵션섹터)를 읽는다.
+ call load1 ; id_start의 두번째 섹터(옵션섹터)를 읽어들인다.
  mov si,cmdbeg ; copy non-options part of command line
  mov di,#Parmline
  mov cx,#CL_LENGTH-1 ; max number of characters to copy ; cmdline의 최대값
 
 cpnocl:
-
- cmp si,#cmdline ; parmline에 cmdbeg(auto... or BOOT_IMAGE....)부터 cmdline위치 까지 복사
+; cmdbeg의 문자열을 Parmline에 복사
+ cmp si,#cmdline ; (auto )BOOT_IMAGE[ =] 
 
 
 
  je cpnodn ; yes -> go on
  movsb ; copy one byte
  loop cpnocl ; next one
- jmp cpovfl ; signal overflow
+ jmp cpovfl ; signal overflow ; 버퍼가 꽉찼다.
 
 cpnodn:
-
- pop ax ; get saved pointer
- pop si ; get saved descriptor
+; 커널이미지 이름을 Parmline에 복사 (null end)
+ pop ax ; get saved pointer ; id_flags 위치
+ pop si ; get saved descriptor ; 커널 이미지 이름
  push si
  push ax
 cpdname:
  lodsb
  or al,al
- jz cpdname9 ; cmdline에서 끝(null)까지 parmline에 복사
+ jz cpdname9
  stosb
  dec cx
  jmp cpdname
 cpdname9:
 
- mov si,#Dflcmd ; constant options ? ; Dflcmd에서 자료 처리를 위해 사전준비.
+ mov si,#Dflcmd ; constant options ? ; 옵션 섹터에서 읽어들인 옵션이 있는가?
  cmp byte ptr (si),#0
  je nocopt ; no -> go on
- mov al,#32 ; add a space ; Dflcmd에 값이 있으면 parmline에 공백을 한칸 넣는다.
+ mov al,#32 ; add a space ; 옵션이 있으면 Parmline에 공백 넣어 준비한다.
  stosb
  dec cx ; count character
- jz cpovfl ; cx가 0이면 패스
+ jz cpovfl ; 버퍼가 꽉 찼으면 패스
 cpcodsp:
+; 옵션섹터 Parmline에 복사
 
 
-
- cmp dword ptr (si),#0x3d6d656d ; "mem="
+ cmp dword ptr (si),#0x3d6d656d ; "mem=" ; mem= 파싱
 
  jne cpnotmem
- call getmem ; get the user-provided memory limit ; Dflcmd가 "mem="이면 mem 뒤에 오는 값을 계산해서 hma에 넣는다.
+ call getmem ; get the user-provided memory limit ; "mem=" 뒤에 오는 값을 계산해서 hma에 넣는다.
 cpnotmem:
  lodsb ; fetch next byte
  cmp al,#32 ; space ?
- je cpcodsp ; yes -> discard it ; 다음글자가 공백이면 위로 올라간다.
+ je cpcodsp ; yes -> discard it ; 다음글자가 공백이면 다음 옵션
 cpcolp: or al,al ; NUL ?
  jz cpcodn ; yes -> done
- stosb ; store byte ; 끝이 아니면 parmline에 공백을 넣어주고 다음 처리 준비
+ stosb ; store byte ; NUL/SP가 아니면 Parmline에 계속 복사
  dec cx ; count character
  jz cpovfl
  cmp al,#32 ; a space ?
@@ -1218,49 +1218,49 @@ cpcodn: seg es
  jne nocopt ; no -> go on
  dec di ; discard it
  inc cx ; **
-nocopt: mov si,options ; append variable options
+nocopt: mov si,options ; append variable options ; cmdline의 옵션부분 복사
 cpvalp: lodsb ; copy one byte
  stosb
  or al,al ; NUL ?
  jz cpdone ; done?
  loop cpvalp ; count and loop back
-cpovfl: mov (di),cl ; CX is zero
+cpovfl: mov (di),cl ; CX is zero ; 버퍼가 꽉차있으면 끝에 0 표시
 
 
 ! parmline에 복사 완료
 cpdone:
-# 1586 "second.S"
+# 1586 "second.S" ! 커널에 vga값을 넘긴다.
  mov es,[initseg] ; load the original boot sector
  xor bx,bx ; load now
- call load1 ; initseg:0에 1섹터 로드 bootsect.S
- pop si ; restore SI
+ call load1 ; initseg:0에 1섹터 로드 (bootsect)
+ pop si ; restore SI ; id_flags 위치 복원
  lodsw ; get flags bit map
- xchg bx,ax ; move to BX
- lodsw ; copy parameters ... VGA mode ... (done)
+ xchg bx,ax ; move to BX ; bx=id_flags
+ lodsw ; copy parameters ... VGA mode ... (done) ; ax=id_vga_mode
  cmp word ptr vgaovr,#0x8000 ; VGA mode not overridden on ; VGA_NOCOVR
     ; command line ?
- je vganorm ; no -> go on
- mov ax,vgaovr ; use that value
+ je vganorm ; no -> go on ; vga 세팅이 안됐으면 패스
+ mov ax,vgaovr ; use that value ; 세팅된 vga 값을 넣어준다.
  jmp vgaset
-vganorm: test bx,#1
+vganorm: test bx,#1 ; FLAG_VGA가 꺼져있으면 세팅하지 않는다.
  jz novga
 vgaset: seg es
-  mov [506],ax ; magic offset in the boot sector
+  mov [506],ax ; magic offset in the boot sector ; 커널의 video mode에 vga값을 넣는다.
 novga: push bx ; use flags (BX) later
- test bx,#4 ; ... lock target ?
+ test bx,#4 ; ... lock target ? ; FLAG_LOCK
  jnz lockit ; yup -> do it
  cmp byte ptr dolock,#0 ; did user ask to lock new target ?
  je nolock ; no -> go on
 lockit:
-
- mov bx,#lkwbuf ; save the command line
+! FLAG_LOCK 플래그나 lock옵션이 켜졌다면 DFL에 쓴다.
+ mov bx,#lkwbuf ; save the command line ; 리로의 옵션이 빠진 cmdline가 lkcbuf에 복사되었다.(비대화식이면 0이다.) lkwbuf는 0xf4f2, 0x6b6d등 매직넘버+lkcbuf
  mov word (bx),#0xf4f2 ;
  push es
  push si
 
         push ds ;
-        pop es ;
- call cmd_write ; write out the command line
+        pop es ; es:bx
+ call cmd_write ; write out the command line ; lock 옵션이 켜있으면 사용한 옵션을 dfl 섹터에쓴다.
 
  pop si
  pop es
@@ -1271,24 +1271,24 @@ nolock:
 
 
  xor cx,cx
- seg es
-   add cl,[497]
+ seg es ; initseg:
+ add cl,[497] ; 0x1F1 ; setup 코드의 섹터수
 ;;; or cx,cx
  jnz lsetup
  mov cl,#4 ; default is to load four sectors
 lsetup:
- mov es,[setupseg] ; load the setup codes ; 일반적으로 0x9020 initseg 다음 섹터
+ mov es,[setupseg] ; load the setup codes ; 0x9020. initseg(bootsect) 다음 섹터
 
 
  mov ax,cx ; number of sectors to AX ; 섹터수는(/512(==2^9))
  shl ax,#5 ; convert to paragraphs (9-4) ; <<5번하면 세그먼트 단위가 된다.
  mov bx,es
- add bx,ax ; setupseg(0x9020) + (setup) 세그먼트 크기
- add bx,#STACK>>4 ; allow for stack space in paragraphs ; 스택의 세그먼트 단위를 위 결과에 더해준다.
+ add bx,ax ; setupseg(0x9020) + setup크기 (세그먼트)
+ add bx,#STACK>>4 ; allow for stack space in paragraphs ; +스택크기
  mov ax,cs
  cmp bx,ax
- jbe enough_mem ; 로드한 크기가 현재 코드를 침범하지 않으면 enough_mem
- mov bx,#msg_mem ; we are very short on memory
+ jbe enough_mem
+ mov bx,#msg_mem ; we are very short on memory ; setup+stack이 현재 코드를 침범하면
  call say ; 스택이 오버랩됐다고 메세지 출력
 
 enough_mem:
@@ -1296,7 +1296,7 @@ enough_mem:
 
  xor bx,bx ; other operating system)
 lsloop: push cx
- call loadopt ; 0x9020에 섹터수만큼 로드하고 launch ; 실제 리눅스???
+ call loadopt ; setup 코드를 읽어들인다.
  pop cx
  loop lsloop
 
@@ -1304,16 +1304,16 @@ lsloop: push cx
 
 
  pop bx ; get flags
- test bx,#8 ; "modern" kernel ? FLAG_MODKRN	; bzimage?
+ test bx,#8 ; "modern" kernel ? FLAG_MODKRN	; bzimage? ; modern(big) kernel인가?
  jz loadlow ; no -> avoid all patching and such
  seg es ; set loader version
- mov byte ptr (16),#0x02 ;LOADER_VERSION ; setupseg:16에 로더 버전을 넣어준다.
+ mov byte ptr (16),#0x02 ;LOADER_VERSION ; setupseg:16에 로더 타입(을 넣어준다.
 
  test bx,#256 ; load kernel high ; FLAG_LOADHI
- jz nohigh ; loadhi가 꺼져있으면 gdt 설정 않음.
-! gdt 세팅
- seg es
- mov ax,word ptr (20+1) ; get start address 00 1000 00
+ jz nohigh ; loadhi가 꺼져있으면 메모리 1MB 위쪽에 로드
+! 상위메모리에 로드하기 위해 gdt 세팅
+ seg es ; setupseg:
+ mov ax,word ptr (20+1) ; get start address 00 1000 00 ; 20~23은 커널 시작주소 (code32_start)
  mov (gdt+0x1b),ax
  seg es
  mov al,byte ptr (20+3) ; get hi-byte of address
@@ -1321,16 +1321,16 @@ lsloop: push cx
 nohigh:
 
  seg es ; version >= 1 ?
- cmp word ptr (6),#0x200 ; NEW_HDR_VERSION 버전이 0x200 이하면 노힙!
+ cmp word ptr (6),#0x200 ; NEW_HDR_VERSION ; 리눅스 boot protocol 버전이 2.00 이하면 노 힙!
  jbe noheap ; no -> do not patch heap
  mov ax,cs
  sub ax,[initseg] ; find no. of paragraphs available
- shl ax,4 ; init부터 second 시작부분까지 바이트 크기
- add ax,#Parmline-SETUP_STACKSIZE-BOOTSECT ; parmline-2048-512 ; SLA_SIZE_DYN ; setup load area size dynamic
+ shl ax,4 ; init부터 second 시작부분 크기 (bytes)
+ add ax,#Parmline-SETUP_STACKSIZE-BOOTSECT ; parmline-2048-512 ; SLA_SIZE_DYN  setup load area size dynamic ; second 영역 크기 (bss포함)
  seg es
- mov word ptr (36),ax ; 힙을 구해서 넣어준다.
+ mov word ptr (36),ax ; heap_end_ptr ; lilo가 로드된 곳은 이제 heap으로 쓰인다.
  seg es ; patch flags
- or byte ptr (17),#0x80 ; LFLAG_USE_HEAP
+ or byte ptr (17),#0x80 ; LFLAG_USE_HEAP ; 커널 플래그의 CAN_USE_HEAP ; heap이 유효하다.
 noheap:
  pop si ; restore pointer to Descr to load
 
@@ -1348,7 +1348,7 @@ noheap:
  cbw
  or ax,bx ; load low ?
 
- je loadlow ; yes -> do it
+ je loadlow ; yes -> do it ; GDT 주소가 0이면 1M 아래로 읽는다.
  xor ax,ax ; GDT is already set up ...
  mov es,ax
  mov bx,#gdt
@@ -1371,8 +1371,8 @@ loadlow:
 launch2:
 
  jmp launch ; go !
-! loadfile은 [map]의 섹터주소 배열을 기반으로 sread를 이용해 SYSSEG(0x1000):0에 파일을 모두 읽어들인다. map의 마지막은 다음 map의 섹터주소다.
-loadfile:
+! loadfile은 섹터주소의 배열(map)을 통해 SYSSEG(0x1000):0에 모두 읽어들인다.
+loadfile: ; 메모리 1MB 아래쪽 SYSREG에 읽는다.
  push #SYSSEG ; load a file at SYSSEG:0000 ; 0x1000:0에 로드한다.
  pop es
  xor bx,bx
@@ -1382,7 +1382,7 @@ lfile: call load
 ! Load one sector. Issue an error at EOF.
 ! load1을 호출하면 sa_size 구조체 하나(1섹터)만 읽고 리턴한다. 
 load1: call loadit ; load the sector
- mov bx,#msg_eof ; we only get here at EOF
+ mov bx,#msg_eof ; we only get here at EOF ; map이 비었으면 에러 출력후 다시시작
  call say
  br restrt
 
@@ -1392,11 +1392,11 @@ loadit: call load ; load it
 
 ! Load one sector. Start the system at EOF.
 
-loadopt: call loadit ; load the sector
+loadopt: call loadit ; load the sector ; 정상이면 loadopt를 호출한 쪽으로 리턴하고 map의 끝을 만나면 launch로 뛴다.
  jmp launch ; go
 
 ! Load one sequence of sectors. Leave outer function at EOF.
-! [map]의 인덱스를 기반으로 sread를 이용해 순차적으로 섹터들을 읽어들인다.
+! [map]의 섹터주소들을 기반으로 sread를 이용해 순차적으로 섹터를 읽는다. 이 함수는 섹터를 읽고 포인터들을 증가시키고 리턴한다. map의 끝(NUL)을 만나면 한층 위로 리턴한다. 1M 위에 로드할땐 ES=0, bx엔 GDT 오프셋을 넣는다.(xread)
 load: push es ; save ES:BX
  push bx
 lfetch: mov si,moff ; get map offset
@@ -1410,13 +1410,13 @@ lfetch: mov si,moff ; get map offset
  jnz noteof
  pop bx ; restore ES:BX
  pop es
- pop ax ; pop return address ; 디스크 읽기를 완전히 (한단계 더) 리턴한다.
+ pop ax ; pop return address ; 한층 위로 리턴한다.
  ret ; return to outer function
 noteof: add si,#sa_size ; increment pointer ; cx,dx,al 5바이트 ; 다음 섹터 위치
  mov moff,si
  cmp si,#512 - sa_size + 1 ; page end ?
  jb near doload  ; 맵의 끝이 아니면 상위메모리 혹은 일반으로 읽어들인다.
-! 맵섹터의 마지막 sa_size(5bytes)는 다음 맵 섹터다.
+! map의 마지막 섹터주소는 다음 맵 섹터다.
  mov moff,#0 ; reset pointer
  push cs ; adjust ES
  pop es
@@ -1425,10 +1425,10 @@ noteof: add si,#sa_size ; increment pointer ; cx,dx,al 5바이트 ; 다음 섹�
  push bx ; so save it
  mov bx,[map] ; load map page
  call sread
-        pop ax ; restore the hi-nibble
+ pop ax ; restore the hi-nibble
  mov hinib,al ;
 
- mov al,#0x2e ; print a dot ; 인덱스를 읽을때마다 '.' 을 출력한다.
+ mov al,#0x2e ; print a dot ; map 섹터를 읽을때마다 '.' 을 출력한다.
  call display
  jmp lfetch ; try again
 
@@ -1436,13 +1436,13 @@ noteof: add si,#sa_size ; increment pointer ; cx,dx,al 5바이트 ; 다음 섹�
 
 launch:
 ; terminate emulation if CD boot
- test byte ptr [par2_flag2],#2 ; a CD? FLAG2_EL_TORITO	
+ test byte ptr [par2_flag2],#2 ; a CD? FLAG2_EL_TORITO	 ; 매체가 CD라면 emultaion을 종료
  jz not_el_torito
  mov si,#Map ; empty command packet
  mov byte ptr (si),#0x13 ; size of command packet
- mov ax,#0x4b00 ; terminate emulation ; Bootable CD-ROM - TERMINATE DISK EMULATION
+ mov ax,#0x4b00 ; terminate emulation ; Bootable CD-ROM - TERMINATE DISK EMULATION ; CDROM에서 floppy처럼 부팅했다면 A 드라이브 종료. 하드처럼 부팅했다면 드라이브 번호를 1씩 감소(정상 번호)
 ;;;; mov dl,al ; DL is 0
- mov dl,[init_dx] ; terminate boot device
+ mov dl,[init_dx] ; terminate boot device ; 부팅한 (CD) 드라이브 번호
  int 0x13
 not_el_torito:
 
@@ -1451,7 +1451,7 @@ not_el_torito:
  call crlf ; display a CRLF
 
 
- mov dx,#0x3f2 ; stop the floppy motor ; 모터를 꺼줍니다.
+ mov dx,#0x3f2 ; stop the floppy motor ; 플로피 모터를 끈다.
  xor ax,ax
  out dx,al ; outb
  mov dl,al
@@ -1461,41 +1461,41 @@ not_el_torito:
  mov di,#Parmline ; set parameter line offset
  mov ax,cs ; find where we are loaded
  sub ax,[initseg] ; find no. of paragraphs available
- shl ax,4 ; convert para. to bytes
- add di,ax
- seg es
- cmp dword ptr CL_HEADER_ID,#0x53726448 ; "HdrS" (reversed)
+ shl ax,4 ; convert para. to bytes ; initseg ~ second 까지의 크기
+ add di,ax ; initseg부터의 Parmline 오프셋
+ seg es ; initseg
+ cmp dword ptr CL_HEADER_ID,#0x53726448 ; "HdrS" (reversed) ; 커널 헤더 signature 2.00부터 지원
  je chkver ; go check header version
 mbchain:
-
+! 헤더 signature가 다르다. 리눅스 부팅이 아닌 체인로더로 동작한다.
 ! it must be the chain loader
-
+! 읽어들인 setup sector가 chain loader인지 확인한다.
 
 
  seg fs ; suppress BIOS data collection
  or byte ptr par1_prompt+SSDIFF,#16 ; suppress BIOS data collection
-! 바이오스 수집
-
-   ; ES:DI will point at param line (chain.b)
+! 바이오스 정보 수집 안함
+! external parameter 생성
+; ES:DI will point at param line (chain.b)
  push ds ; save DS
  mov ds,[setupseg] ; point at chain loader(?) header
 ; DS points at chain loader
- cmp dword [parC_signature],#0x4f4c494c ;
+ cmp dword [parC_signature],#0x4f4c494c ; LILO
  jne not_chain
- cmp word [parC_stage],#0x10
+ cmp word [parC_stage],#0x10 ; stage 
  jne not_chain
- cmp word [parC_version],#256*2 +23
+ cmp word [parC_version],#256*2 +23 ; 23.2 버전
  jne not_chain
  mov dx,[parC_drive] ; get drive
 ;;; call map_device ; map drive -- uses CS to address "devmap"
- mov [parC_drive],dl ; store mapped drive
- mov [parC_devmap],#devmap ; save our drive mapping
+ mov [parC_drive],dl ; store mapped drive ; 매핑된 드라이브
+ mov [parC_devmap],#devmap ; save our drive mapping ; 드라이브 매핑 테이블 저장
  mov [parC_devmap+2],cs ; our DS register
 not_chain:
  pop ds
 
  seg fs
- mov dx,[SETUP_STACKSIZE-8+SSDIFF+6] ; pass DX from first stage
+ mov dx,[SETUP_STACKSIZE-8+SSDIFF+6] ; pass DX from first stage ; first에서 저장된 드라이브?
 
 
 
@@ -1508,32 +1508,32 @@ not_chain:
 chkver:
  mov bh,[gdt+0x1f] ; check for kernel/initrd conflict
  shl ebx,#8
- mov bx,[gdt+0x1b] ; form kernel final load address
+ mov bx,[gdt+0x1b] ; form kernel final load address ; ebx=kernel 주소 
  shl ebx,#8
- mov eax,[rdbeg] ; initrd beg address (0 if none)
+ mov eax,[rdbeg] ; initrd beg address (0 if none) ; eax=initrd 주소
  or eax,eax
- jz no_overwrite
+ jz no_overwrite ; 램디스크 사용안하면 패스
  sub eax,ebx
  jae no_overwrite
- mov bx,#msg_confl
+ mov bx,#msg_confl ; 램디스크 위치가 커널 로드 위치보다 낮으면 에러 출력후 무한루프
  br zz
 
 no_overwrite:
 # 1885 "second.S"
- seg es
- cmp word ptr CL_HDRS_VERSION,#NEW_VERSION ; check for
+ seg es ; initseg
+ cmp word ptr CL_HDRS_VERSION,#NEW_VERSION ; check for 0x202
     ; new cmdline protocol
  jb protocol201
 
 ! and now the new protocol
-
- mov ax,es ; form long address
- movzx edx,ax ; zero extend segment part to EDX
- movzx edi,di ; zero extend offset
- shl edx,4 ; make segment into address
- add edx,edi ; form long absolute address
- seg es
- mov CL_POINTER,edx ; and pass the address
+! di=(initseg부터 Parmline의 오프셋)
+ mov ax,es ; form long address ; initseg
+ movzx edx,ax ; zero extend segment part to EDX ; 커널(initseg) 시작부분
+ movzx edi,di ; zero extend offset ; Parmline 옵션 주소
+ shl edx,4 ; make segment into address ; 세그먼트 -> 오프셋
+ add edx,edi ; form long absolute address ; 세그먼트 포함안한 절대주소
+ seg es ; initseg
+ mov CL_POINTER,edx ; and pass the address ; 0x228 ; 2.02 이상에서 쓰는 커널 command line
 
 
 
@@ -1546,7 +1546,7 @@ no_overwrite:
 
 protocol201:
  seg es
- mov CL_MAGIC_ADDR,#CL_MAGIC ; set magic number
+ mov CL_MAGIC_ADDR,#CL_MAGIC ; set magic number ; 구버전에서는 0xa33f와 오프셋을 넣어서 command line을 전달한듯 하다.
  seg es
  mov word ptr CL_OFFSET,di
 # 1937 "second.S"
@@ -1556,37 +1556,37 @@ start_setup: ; kernel boot comes here
  call say
 
  seg fs ; suppress BIOS data collection?
- test byte ptr par1_prompt+SSDIFF,#16 ; suppress?
+ test byte ptr par1_prompt+SSDIFF,#16 ; suppress? ; FLAG_NOBD
 
  jz start_setup3
- mov bx,#msg_by
+ mov bx,#msg_by ; "bypassed\n"
  call say
- jmp start_setup2
+ jmp start_setup2 ; BIOS data 수집 안하고 점프
 start_setup3:
+! FLAG_NOBD가 꺼져있으면 BIOS 데이터 수집
+
+ or byte ptr [Keytable+256+mt_flag],#16 ; suppress ; FLAG_NOBD
 
 
- or byte ptr [Keytable+256+mt_flag],#16 ; suppress
 
-
-
- call kt_write
+ call kt_write ; 키테이블에 기록. FLAG등 MENUTABLE의 내용
 # 1984 "second.S"
 
  seg fs
- mov dx,[SETUP_STACKSIZE-8+SSDIFF+6] ; pass in DX from first stage
+ mov dx,[SETUP_STACKSIZE-8+SSDIFF+6] ; pass in DX from first stage ; 부팅한 드라이브
 
 
  push es ; save ES
  call is_prev_mapper ; is there a previous mapper
- jz no_remove
+ jz no_remove ; 매퍼가 없으면 no_remove
  seg es
-   mov word (di),#0 ; sterilize it
+   mov word (di),#0 ; sterilize it ; drive map이 있으면 Parmline 초기화
 no_remove:
  pop es ; and restore ES
 
- call io_biosdata
+ call io_biosdata ; bios 정보 수집 (video,disk...)
 
- mov bx,#msg_s
+ mov bx,#msg_s ; "successful\n"
  call say
 
 ; if the BIOS data collection was successful, do not suppress it on future boots
@@ -1601,7 +1601,7 @@ start_setup2: ; chain loader boot comes here
 
  mov ax,#1500/55 ; about 1.5 second
  call setto ; set timeout
-vpaus1: test byte ptr timeout,#-1
+vpaus1: test byte ptr timeout,#-1 ; 시간 됐는가?
  jz vpaus1 ; 시간 대기
 
  call remto ; free timer interrupt ; 타이머 인터럽트 복구
@@ -1616,11 +1616,11 @@ vpaus1: test byte ptr timeout,#-1
 
 
  add sp,#Parmline ; increase stack size over this code
-if ~*&1 ; align to an odd memory location
+if ~*&1 ; align to an odd memory location ; 메모리 주소를 홀수로 정렬. setupseg 때문인가?
  nop
 endif
- jmpi 0,SETUPSEG ; segment part is a variable ; 커널로 점프
-setupseg = *-2 ; setupseg is filled in now
+ jmpi 0,SETUPSEG ; segment part is a variable ; 커널로 점프 ; 5바이트 점프코드 EA 00 00 20 90 (SETUPSEG는 가변적)
+setupseg = *-2 ; setupseg is filled in now ; 줄곧 계산해온 setupseg를 점프 세그먼트로 사용
 initseg: .word INITSEG
 
 
@@ -1631,7 +1631,7 @@ doload: pop bx ; restore ES:BX ; 메인에서 호출될때 bx 값
 
 ! Load a sequence of sectors, possibly moving into "high memory" (> 1 MB)
 ! afterwards.
-! es가 0이면 상위메모리에 읽고 아니면 그냥 읽는다.
+! es가 0이면 상위메모리에 읽고 아니면 1M아래로 읽는다.
 xread: push ax ; ES == 0 ?
  mov ax,es
  or ax,ax
@@ -1641,13 +1641,13 @@ xread: push ax ; ES == 0 ?
 
 
  jmp sread
-
-rdhigh: push bx ; okay - DS:BX points to GDT in this case ; sread로 읽어서 1M이상 메모리로 옮긴다.
+; sread로 읽어서 1M 위쪽 메모리로 옮긴다.
+rdhigh: push bx ; okay - DS:BX points to GDT in this case ; 호출될때 넘어온 bx 값
  mov bx,#LOADSEG ; adjust ES:BX ; 0x1000
  mov es,bx
  xor bx,bx
- call sread ; load the sector(s) ; 일단 LOADSEG로 읽는다.
-        mov tempal,al ; al 보존
+ call sread ; load the sector(s) ; 먼저 LOADSEG로 읽는다.
+ mov tempal,al ; 읽은 섹터수
  pop bx ; get pointer to GDT
  push ax ; just in case ...
  push cx
@@ -1656,13 +1656,13 @@ rdhigh: push bx ; okay - DS:BX points to GDT in this case ; sread로 읽어서 1
  push ds
  pop es
  xor cx,cx ; number of words to move
- mov ch,tempal
+ mov ch,tempal ; 섹터수*512/2  ; ch에 넣으면 딱 맞다.
 # 2095 "second.S"
  push [gdt+0x1e]
  push bx ; do the transfer. (save BX, CX and SI because
  push cx ; we are paranoid)
  push si
- mov ah,#0x87 ; Move Extended Memory Block
+ mov ah,#0x87 ; Move Extended Memory Block ; CX=word count , ES:SI=GDT 포인터
  int 0x15
  pop si
  pop cx
@@ -1671,10 +1671,10 @@ rdhigh: push bx ; okay - DS:BX points to GDT in this case ; sread로 읽어서 1
  pop ax ; check the GDT
  cmp ah,[gdt+0x1f] ; catch a BIOS that does not handle 386
     ; addresses (>16Mb)
- jne badmov+1 ; AH error code will be hi byte of address
+ jne badmov+1 ; AH error code will be hi byte of address ; 에러
  shr cx,#8-1 ; convert words to bytes/256
  sub ax,ax ; put ES back to 0
- add (si+0x1b),cx
+ add (si+0x1b),cx ; 다음 옮길 고위 메모리 주소
  adc (si+0x1f),al
  mov es,ax ; put ES back to 0
  pop si
@@ -2000,7 +2000,7 @@ kt_set:
 
 
 ! Sector write; used for the keytable only
-
+! 키테이블 버퍼를 키테이블 섹터에 쓴다.
 kt_write:
  push es
  push ds
@@ -2009,11 +2009,11 @@ kt_write:
 
 
  seg fs ; BIOS data collection worked before?
- test byte ptr par1_prompt+SSDIFF,#128
+ test byte ptr par1_prompt+SSDIFF,#128 ; FLAG_BD_OKAY ; 이미 했으면 안함
 
  jnz kt_nowrite
 
- test byte ptr [par2_flag2],#2 ; a CD?
+ test byte ptr [par2_flag2],#2 ; a CD? ; FLAG2_EL_TORITO ; cd면 안쓴다.
  jnz kt_nowrite
 
  call cwrite
@@ -2035,7 +2035,7 @@ cmd_write:
 ; fall into cwrite
 ;
 ; General sector write
-;
+; 디스크에 쓴다.
 cwrite:
 
 
@@ -2317,179 +2317,179 @@ crc32d:
 
 
 ; enter with BX == Ramdisk size (in 4k pages)
-;
+
 rd_setup:
  push bx ; save Ramdisk size in pages
  mov eax,[hma] ; user specified?
  or eax,eax
 
 
-
- jnz near rd_have_hma
+; 0xe820 0xe01 0x88 순으로 메모리 체크
+ jnz near rd_have_hma ; 메모리 크기(mem=)가 세팅되어있으면 점프
 
  seg fs
- test byte ptr par1_prompt+SSDIFF,#32
+ test byte ptr par1_prompt+SSDIFF,#32 ; FLAG_LARGEMEM /* BIOS has MoveExtMemBlk support for 386 */
 
- jz near no_e801
+ jz near no_e801 ; LARGEMEM을 지원안하면 0x88로 메모리 크기만 잰다.
 
 ; try the E820 memory map first
  xor edx,edx ; flag nothing found
  xor esi,esi ; flag size==0
- xor ebx,ebx
+ xor ebx,ebx ; 확인할 메모리 영역
  jmp e8go
-e8go2: or ebx,ebx ; test for end
+e8go2: or ebx,ebx ; test for end ; 다음에 읽을 메모리. 0을 리턴하면 끝이다.
  jz e8go5
 e8go: push edx ; save best prospect
- mov eax,#0xe820
- mov edx,#0x534d4150 ;'SMAP'
- mov ecx,#20
+ mov eax,#0xe820 ; function 번호 0xe820
+ mov edx,#0x534d4150 ;'SMAP' 예약된 signature
+ mov ecx,#20 ; 결과값이 들어갈 버퍼크기
  mov di,#memmap
  int 0x15 ; get memory map
  pop edx ; restore what we have found so far
- jc no_e820
- cmp eax,#0x534d4150 ;'SMAP'
+ jc no_e820 ; 0xe820 실패시 0xe801 체크
+ cmp eax,#0x534d4150 ;'SMAP' ; 리턴받은 signature, size 확인
  jne no_e820
  cmp ecx,#20
  jne no_e820
 # 2970 "second.S"
- cmp word memmap+16,#1 ; available?
+ cmp word memmap+16,#1 ; available? ; 사용가능한가?
  jne e8go2
  mov eax,memmap+4 ; hi part of start
- shrd memmap,eax,#10 ; convert start to 1k
+ shrd memmap,eax,#10 ; convert start to 1k ; 메모리 주소 8바이트를 shift해서 1kb 단위로 만든다.
  mov eax,memmap+12 ; hi part of size
- shrd memmap+8,eax,#10 ; convert to 1k
+ shrd memmap+8,eax,#10 ; convert to 1k ; 역시 메모리 크기를 kb 단위로 만든다.
  cmp dword memmap,#1024 ; below 1M
- jb e8go2 ; below 1M, no interest
- cmp esi,memmap+8 ; check size
+ jb e8go2 ; below 1M, no interest ; 시작 주소가 1M보다 작으면 다음 영역
+ cmp esi,memmap+8 ; check size ; 1M이상이고 가장 큰가?
  ja e8go2 ; want largest
  mov edx,memmap ; start (in 1k)
- mov esi,memmap+8 ; size (in 1k)
+ mov esi,memmap+8 ; size (in 1k) ; 이전보다 큰 메모리 크기를 넣는다.
  add edx,esi ; HMA in 1k
  jmp e8go2
 
 e8go5: or edx,edx ; find anything?
  jz no_e820
- xchg eax,edx
- jmp rd_have_hma
+ xchg eax,edx ; 찾은 값이 있는가?
+ jmp rd_have_hma ; eax=메모리크기 넣고 점프
 no_e820:
-; above failed, try the older E801 block count interface
- xor cx,cx ; some BIOSs are buggy
+; above failed, try the older E801 block count interface ; e820에 실패했다면 e801로 검사.
+ xor cx,cx ; some BIOSs are buggy ; 특정 바이오스는 AX=BX=0 이나 CX=DX=0을 리턴한다. 어떤 레지스터를 쓸지 체크
  xor dx,dx
  mov ax,#0xe801 ; call
  stc
  int 0x15
- jc no_e801
+ jc no_e801 ; 에러
  or cx,cx
  jz e801cx
- mov ax,cx
+ mov ax,cx ; cx가 세팅되어 있으면 cx의 값을 쓴다.
 e801cx: or dx,dx
  jz e801dx
- mov bx,dx
+ mov bx,dx ; dx가 세팅되어 있으면 dx의 값을 쓴다.
 e801dx:
  movzx ebx,bx
  movzx eax,ax
- shl ebx,#6 ; convert 64k to 1k
+ shl ebx,#6 ; convert 64k to 1k ; ax는 1k 크기, bx는 64k 단위라 kb 단위로 변환
  mov ecx,#16*1024
  cmp eax,ebx ; compare sizes
  ja e801eax
- add ebx,ecx ; add in 16M
+ add ebx,ecx ; add in 16M ; 1~16M영역이 16M이상보다 작거나 같으면 16M 이상 영역 사용. bx는 16M 이상 영역이라 크기에 16M을 더한다.
  mov eax,ebx ; and use this value
- jmp rd_have_hma
+ jmp rd_have_hma ; eax에 메모리 크기 넣고 점프
 e801eax:
- add eax,#1024 ; add 1M
+ add eax,#1024 ; add 1M ; 1M에서 16M 사이 영역이라 크기에 1M을 더해 메모리 상한선을 구한다.
  cmp eax,ecx ; is it 16M
  jne rd_have_hma
- add eax,ebx ; add in ebx
+ add eax,ebx ; add in ebx ; 16M까지 꽉 찼으면 상한선은 16M보다 크다. 16M 이상 값을 사용
  jmp rd_have_hma
 
 no_e801:
 ; above two methods failed, try the old 0x88 function
  mov ah,#0x88 ; get count of extended memory blocks
  int 0x15
- movzx eax,ax ; extend to dword
+ movzx eax,ax ; extend to dword ; 1M부터 kb단위의 크기 반환. 최대 64M
  add eax,#1024 ; add in base 1M
 ;
-rd_have_hma: ; have the HMA / 1k in EAX
+rd_have_hma: ; have the HMA / 1k in EAX ; 메모리 크기가 eax에 kb단위로 온다.
 # 3038 "second.S"
  mov ebx,#15*1024 ; 15Mb
  cmp eax,ebx ; compare to 15M
  jbe rd_use_eax ; use lower value
-
+; 메모리 크기가 15M보다 큰가?
  seg fs
- test byte ptr par1_prompt+SSDIFF,#32
+ test byte ptr par1_prompt+SSDIFF,#32 ; FLAG_LARGEMEM
 
  jnz large_okay
- xchg eax,ebx ; limit to 15Mb
+ xchg eax,ebx ; limit to 15Mb ; LARGEMEM을 안쓰면 15M으로 제한.
 large_okay:
- mov ebx,#0x38000000/1024
+ mov ebx,#0x38000000/1024 ; 896M /1024
 
  push ds
  mov ds,[initseg] ; load the original boot sector
- cmp word ptr [CL_HDRS_VERSION],#0X203
+ cmp word ptr [CL_HDRS_VERSION],#0X203 ; BOOT PROTOCOL이 203이상이어야 RAMDISK_MAX 값을 사용한다.
  jb not203
- mov ebx,[CL_RAMDISK_MAX]
+ mov ebx,[CL_RAMDISK_MAX] ; 
 # 3067 "second.S"
  dec ebx
- shr ebx,#10 ; divide by 1024
+ shr ebx,#10 ; divide by 1024 ; 램디스크 최대크기 (KB)
  inc ebx
 not203:
  pop ds
-
+! EBX는 램디스크 최대크기(KB) EAX는 메모리 크기
  cmp eax,ebx
  jb rd_use_eax
 ;;;rd_use_smaller:
- xchg eax,ebx ; must use the smaller
+ xchg eax,ebx ; must use the smaller ; ebx가 eax 이하면 eax=ebx. 메모리 크기와 램디스크 최대 크기중 작은 값을 사용한다.
 rd_use_eax:
- pop bx ; get size in pages
- shr eax,2 ; convert to pages
+ pop bx ; get size in pages ; 램디스크 크기 (4kb단위:pages)
+ shr eax,2 ; convert to pages ; page는 4kb 크기
  movzx ebx,bx ; zero high part of size
- sub eax,ebx ; start address of ramdisk to EAX
+ sub eax,ebx ; start address of ramdisk to EAX ; 상한선에서 램디스크 크기를 뺀다.
 # 3098 "second.S"
  cmp eax,#4*256 ; Ramdisk loaded below 4Mb
  jae rd_okay ; kernel to be useful ...
- mov bx,#msg_rd4M ; complain
+ mov bx,#msg_rd4M ; complain ; 램디스크가 4M 미만 영역에 로드되면 경고 출력
  call say ; is at zz
 
 rd_okay:
- shl eax,4 ; shift (12-8) -> 4
- mov [rdbeg+1],ax ; set up beginning address
- mov [gdt+0x1b],ax ; set the GDT for the moves
+ shl eax,4 ; shift (12-8) -> 4 ; 4kb 단위를 1byte 크기로 변환
+ mov [rdbeg+1],ax ; set up beginning address ; 램디스크 시작주소
+ mov [gdt+0x1b],ax ; set the GDT for the moves ; 옮길 영역
  shr eax,16 ; get hi-byte of address
- mov [rdbeg+3],al ; set rest of address
+ mov [rdbeg+3],al ; set rest of address ; 상위 주소도 옮긴다.
  mov [gdt+0x1f],al ; and in the GDT, too
  ret
 # 3119 "second.S"
 load_initrd:
- push [map]
+ push [map] ; 예전에 쓰던 위치(kernel) 보존
  push [moff]
- mov word ptr [map],#Map2
+ mov word ptr [map],#Map2 ; ramdisk용 map
  push ds
  pop es
- mov ax,(si+id_flags) ; get 32, if any
+ mov ax,(si+id_flags) ; get 32, if any ; FLAG_TOOBIG
 
 
 
- and al,#32 ; separate flag
+ and al,#32 ; separate flag ; FLAG_TOOBIG
 
  seg fs
- or byte ptr par1_prompt+SSDIFF, al ; set 32
+ or byte ptr par1_prompt+SSDIFF, al ; set 32 ; 디스크립터 플래그의 TOOBIG 상태를 first의 플래그에 써준다.
 
  add si,#id_rd_size ; point at ramdisk size long
 ! take care of the RAM disk first
  xor eax,eax
- mov (rdbeg),eax ; clear address
+ mov (rdbeg),eax ; clear address ; 시작주소 초기화
  lodsd
- mov (rdszl),eax ; set rdszl+rdszh
+ mov (rdszl),eax ; set rdszl+rdszh ; rd_size 램디스크 크기
  add eax,#4095 ; round up &
- shr eax,#12 ; convert to pages
- xchg bx,ax ; copy to BX
+ shr eax,#12 ; convert to pages ; 4096 단위로 올림후 나눈다.
+ xchg bx,ax ; copy to BX ; 4096으로 나눈 크기
  lodsw ; address of the first map sector
- xchg cx,ax
+ xchg cx,ax ; 램디스크 map 섹터주소 cx,dx,al
  lodsw
- xchg dx,ax
-        lodsb
+ xchg dx,ax ; 
+ lodsb
  or bx,bx ; no RAM disk ?
- jz noramd ; yes -> skip it 2
+ jz noramd ; yes -> skip it 2 ; 크기가 0이면 ramdisk 사용안함
 
  push si ; save SI, ES, and BX (RD size)
  push es
@@ -2502,8 +2502,8 @@ load_initrd:
 
 
 
- pop bx
- call rd_setup
+ pop bx ; 크기
+ call rd_setup ; 램디스크 상한선 계산, 시작주소/GDT 세팅 끝
 
  cmp dword ptr (rdbeg),#0
  je nordpt ; no -> no need to patch header for that
@@ -2518,17 +2518,17 @@ load_initrd:
  mov es,[setupseg] ; load the setup codes
  mov eax,(rdbeg) ; get RAM disk start address
  seg es
- mov (24),eax ; store in header
+ mov (24),eax ; store in header ; 커널의 initrd load address
  mov eax,rdszl
  seg es
- mov (28),eax ; set RAM disk size
+ mov (28),eax ; set RAM disk size ; 커널의 initrd 크기
 nordpt:
- push #0 ; ES=0 is our secret code to load via GDT
+ push #0 ; ES=0 is our secret code to load via GDT ; ES=0 상위 메모리에 로드한다.
  pop es
  mov bx,#gdt
  call lfile ; load it
 
- mov al,#0x20 ; print a space
+ mov al,#0x20 ; print a space ; initrd 로드 후 공백 출력
  call display
 
  pop es ; restore ES and SI
@@ -2813,13 +2813,13 @@ _shsInit:
  push di
 
  mov di,#shs_digest ;##
- mov dword (di),#0x67452301 ;##
+ mov dword (di),#0x67452301 ;## ; 표준 값으로 초기화
  mov dword (di+4),#0xefcdab89
  mov dword (di+8),#0x98badcfe
  mov dword (di+12),#0x10325476
  mov dword (di+16),#0xc3d2e1f0 ;##
  sub eax,eax
- mov dword (di+20),eax
+ mov dword (di+20),eax ; shs_count를 0으로 초기화
  mov dword (di+24),eax
 
  pop di
@@ -2846,17 +2846,17 @@ _shsUpdate:
 
 ; remain = shsInfo.countLo & (SHS_BLOCKSIZE-1);
  mov di,[shs_count]
- and di,#63 ;##
+ and di,#63 ;## ; mod 512
 
- movzx eax,word (bp+6) ;count
+ movzx eax,word (bp+6) ;count ; 스택은 bp를 가리키고 있다. bp(bp)call(bp+2),si(bp+4),di(bp+6)
  add [shs_count],eax
- adc dword [shs_count+4],#0 ;##
+ adc dword [shs_count+4],#0 ;## carry 올림
 
- mov si,(bp+4) ;buffer
+ mov si,(bp+4) ;buffer ; 패스워드 입력받은 버퍼
 
 shs_J4:
- mov cx,#64 ;##
- sub cx,di ;CX = SHS_BLOCKSIZE-remain
+ mov cx,#64 ;## ; 512 bits. 블럭크기
+ sub cx,di ;CX = SHS_BLOCKSIZE-remain ; 블럭크기-카운트
  cmp ax,cx ; count >= SHS_BLOCKSIZE-remain
  jb shs_J6
 
@@ -3693,7 +3693,7 @@ drvmap:
 ;
 ;
 
-
+! 0x600 메모리에 저장된다
 io_sig: .long 0 ; space for CRC
  .ascii "LiLo" ; "LiLo"
  .word 6 ; sanity check
@@ -3717,7 +3717,7 @@ io_l_sig = *-io_sig
 ; read partition table of device in DL
 ;
 ; save PT
-;
+; 하드의 파티션 정보를 es:di에 복사한다.
 io_get_pt:
  push ds
  push es
@@ -3749,7 +3749,7 @@ io_get_pt:
 
  jc io_get_pt_err
  rep
-   movsb
+   movsb ; primary 파티션(4) 복사
 io_get_pt_ret:
  pop ds
  ret
@@ -3766,7 +3766,7 @@ io_get_pt_err:
 ;
 ; device code is in DL
 ;
-;
+; EDD 지원여부 검사
 io_do_edd_check:
  push dx
  mov ah,#0x41
@@ -3848,8 +3848,8 @@ io_do_edd_check_ret:
 ; All registers preserved
 ;
 ; Side effect is to write the low memory disk data area
-;
-;
+; 
+; 비디오, 디스크정보등을 수집한다.
 ;
 
 io_biosdata:
@@ -3858,7 +3858,7 @@ io_biosdata:
 
  push #0x60 ;save area is at 0060:0000 (0x000600)
  pop es
- mov di,#io_l_sig ;skip over header area
+ mov di,#io_l_sig ;skip over header area ; io_sig 헤더는 패스
 
 ; get the equipment configuration flags
 
@@ -3866,15 +3866,15 @@ io_biosdata:
  mov io_eqp,di ;save equipment pointer
  push dx ; protect this register
 # 191 "biosdata.S"
- int 0x11
+ int 0x11 ; equipment determination 인터럽트. 드라이브수, 비디오 모드등 플래그를 저장
  stosw
 
 ; get the conventional memory size
 # 203 "biosdata.S"
  int 0x12
- stosw ; save the number
+ stosw ; save the number ; 메모리 크기(kb) video ram, extended ram 제외
 # 214 "biosdata.S"
- pop ax ; get saved DX register
+ pop ax ; get saved DX register ; 부팅한 드라이브?
  stosw
 
 
@@ -3900,13 +3900,13 @@ io_biosdata:
  mov bl,[0x84] ; get rows, too
  pop ds
 
- stosw ; save AX
+ stosw ; save AX ; AH=columns, AL=현재 비디오 모드
  xchg ax,bx
- stosw ; save BX
- cmp bl,#7 ; is it MDA
- beq io_floppies ; yup, skip it all
+ stosw ; save BX ; BH=display page, BL=rows
+ cmp bl,#7 ; is it MDA ; 80x25 monochrome text
+ beq io_floppies ; yup, skip it all ; jz word ; 흑백이면 패스
  cmp bh,#80 ; number of columns on screen
- jb io_floppies1 ; probably CGA
+ jb io_floppies1 ; probably CGA ; column이 80보다 작아도 패스
 
 
 
@@ -3922,10 +3922,10 @@ io_biosdata:
 
  int 0x10
 
- stosw ; save AX
+ stosw ; save AX ; 인터럽트 번호
  xchg ax,bx
- stosw ; save BX
- cmp ah,#1
+ stosw ; save BX ; color, mono mode / 메모리등 정보
+ cmp ah,#1 ; 흑백이면 패스
  ja io_floppies1
 
 
@@ -3944,13 +3944,13 @@ io_biosdata:
  stosw ; save BX
  cmp bl,#0x1A ; is function supported?
 
- jne io_floppies
+ jne io_floppies ; 0x1A 비디오 함수가 유효하지 않아도 패스
 
 
 
 
  cmp al,#4
- jb io_floppies1
+ jb io_floppies1 ; Mono, CGA color 등이어도 패스
 
 
 
@@ -3972,7 +3972,7 @@ io_biosdata:
 
 
 
- int 0x10 ; enable screen refresh
+ int 0x10 ; enable screen refresh ; video refresh 사용
 
  pop di
  pop es
@@ -3989,7 +3989,7 @@ io_biosdata:
 
 
 
- mov ax,#0x4F00 ; check VESA present
+ mov ax,#0x4F00 ; check VESA present ; get superVGA information
 ; ES:DI is already set
 
 
@@ -4001,23 +4001,23 @@ io_biosdata:
  int 0x10
 
  seg es
-   mov bx,(di) ; possible "VE"
+   mov bx,(di) ; possible "VE" ; "VESA" 확인
  seg es
    mov cx,(di+2) ; possible "SA"
- stosw ; save AX
+ stosw ; save AX ; 지원여부
  xchg ax,bx
  stosw ; possible "VE"
  xchg ax,cx ; possible "SA"
  stosw
- cmp bx,#0x004F ; good return
- jne io_floppies
+ cmp bx,#0x004F ; good return ; 성공!
+ jne io_floppies ; 뭔가 문제있으면 패스
  cmp cx,#0x4556 ; "VE"
  jne io_floppies
  cmp ax,#0x4153 ; "SA"
  jne io_floppies
 
  mov ax,#0x4F01
- mov cx,#0x0101 ; get mode information
+ mov cx,#0x0101 ; get mode information ; 640x480x256
 
 
 
@@ -4028,13 +4028,13 @@ io_biosdata:
  int 0x10
 
  seg es
-   mov bx,(di) ; get bits
- stosw ; save AX
+ mov bx,(di) ; get bits ; mode attributes
+ stosw ; save AX ; ax가 0이면 성공
  xchg ax,bx
  stosw ; save bits
 
  mov ax,#0x4F01
- mov cx,#0x0103 ; get mode information
+ mov cx,#0x0103 ; get mode information ; 800x600x256 
 
 
 
@@ -4045,7 +4045,7 @@ io_biosdata:
  int 0x10
 
  seg es
-   mov bx,(di) ; get bits
+ mov bx,(di) ; get bits
  stosw ; save AX
  xchg ax,bx
  stosw ; save bits
@@ -4075,22 +4075,22 @@ io_next_drive:
 
  stosw ; save AX
  xchg ax,dx
- stosw ; save DX (low order)
+ stosw ; save DX (low order) ; CX:DX  fixed sectors
  xchg ax,cx
  stosw ; save CX (high order)
  xchg ax,dx ; restore code to AL
  pop dx
 
- jc io_no_disk ; error means no disk present
+ jc io_no_disk ; error means no disk present ; 에러
  dec al ; AL==0 means no disk present
- jns io_get_param ; if S=0, some disk type is present
+ jns io_get_param ; if S=0, some disk type is present ; 에러없고 드라이브가 있으면 정보 얻으러 간다.
 
-io_no_disk:
+io_no_disk: ; 에러발생 혹은 해당 드라이브가 없으면 온다.
  or dl,dl
- jns io_get_param ;do it all on floppies
+ jns io_get_param ;do it all on floppies ; 플로피면 count(4)만큼 마저 검사한다
 
  pop cx ;premature loop termination
- jmp io_loop_end ;skip the rest on fixed disks
+ jmp io_loop_end ;skip the rest on fixed disks ; 하드의 끝
 
 io_get_param:
 
@@ -4100,7 +4100,7 @@ io_get_param:
  push es ; supposedly clobbered for floppies only
  push di ; do not trust anyone
 
- mov ah,#0x08
+ mov ah,#0x08 ; 디스크에 대한 자세한 정보들
 
 
 
@@ -4132,7 +4132,7 @@ io_get_param:
  jne io_fh_check
  cbw ; former DL has disk count
  pop cx ; get HD count
- push ax ; set new HD count
+ push ax ; set new HD count ; 카운트가 0x80
 
 io_fh_check:
  or dl,dl ; check floppy/hard disk
@@ -4147,7 +4147,7 @@ io_fh_check:
 
 io_check_edd:
 
- call io_do_edd_check
+ call io_do_edd_check ; 하드면 EDD 체크
 
 io_skip_edd:
 
@@ -4159,14 +4159,14 @@ io_skip_edd:
 
 
 
-
+! 플로피 4번 검사후 하드 시작, 하드의 끝이면 종료
 io_loop_end:
  or dl,dl ; set the S flag
  push di ;
  mov cx,#16 ; do not touch flags ***
  mov dl,#0x80 ; do not touch flags ***
 
- jns io_next_drive ; do the hard drives if not done
+ jns io_next_drive ; do the hard drives if not done ; 하드가 아니면 루프로 되돌아가고 하드면 루프 종료
 
 
 
@@ -4176,7 +4176,7 @@ io_loop_end:
 ; now save the partition tables
 
 io_get:
- cmp dl,io_good_disk
+ cmp dl,io_good_disk ; 마지막 디스크 번호, 플로피가 끝이라면 종료한다. 하드라면 하드들의 파티션 테이블을 얻는다.
  ja io_got
  call io_get_pt
  inc dx
@@ -4187,7 +4187,7 @@ io_checksum_it:
 
 ; now must record and checksum the results
 
- mov io_lth,di ; address of end is overall count
+ mov io_lth,di ; address of end is overall count ; 수집한 데이터 크기
 
  push di
  xor di,di ;move to here
@@ -4203,7 +4203,7 @@ io_checksum_it:
  call crc32
 
  seg es
- mov [0],eax ; save that crc
+ mov [0],eax ; save that crc ; crc32 체크섬 저장
 
 
 ; restore the registers and return
@@ -4801,16 +4801,16 @@ acmdbeg: .ascii "auto "
 mcmdbeg: .ascii "BOOT_IMAGE"
 prechr: .byte 32 ; space: guard double blank supression
     ; equal sign: variable assignment
-cmdline: .byte 0 ; Map을 사용하지 않을때는 Map의 공간을 cmdline으로 사용할 수 있다. 최소 512bytes(섹터크기)이상. lkwbuf와 lkcbuf는 Map과 Dflcmd와 겹칠수 있다.
+cmdline: .byte 0 ; 커맨드라인용 버퍼. CL_LENGTH가 512면 lkcbuf는 Map과 겹칠수 있다.
 
 
 
 
  .org *+4
 theend:
-; 커맨드라인 영역으로 1024bytes 할당?
-lkwbuf = cmdline+CL_LENGTH+2 ; this is a word ; CL_LENGTH=512
-lkcbuf = lkwbuf+2
+
+lkwbuf = cmdline+CL_LENGTH+2 ; this is a word ; lkwbuf는 매직넘버+lkcbuf 이다. cmdline과 2바이트 띄운다.
+lkcbuf = lkwbuf+2 ; lkwbuf의 매직넘버(2bytes) 들어갈 공간을 띄운다.
 theend2 = lkcbuf+CL_LENGTH ; lkcbuf is 256
 
 the_end1 = theend+511	! theend + 1섹터 (bytes) ; 코드크기/섹터크기 결과값에 +1해준다.
@@ -4822,7 +4822,7 @@ max_secondary:
 # 4140 "second.S"	! max_seocndary = theend 다음 섹터
 Map = max_secondary + 512	! Map = max_secondary + 1 (sector) menu일때 20번째 섹터 ; 섹터주소로 이루어진 배열(map)을 읽을 용도로 쓰인다.
 Dflcmd = Map + 512			! Dflcmd = max_secondary + 2 ; Default command line 버퍼. 다른 섹터 로드용으로도 쓰인다.
-Map2 = Dflcmd				! Map2 = max_secondary + 2
+Map2 = Dflcmd				! Map2 = max_secondary + 2 ; initrd에 사용
 Keytable = Dflcmd + 512 	! Keytable = max_secondary + 3 ; 맨 처음 읽는 Keytable 섹터. 256바이트 이후엔 Menutable영역이 있다.
 Descr = Keytable + 512		! Descr = max_secondary + 4
 ParmBSS = Descr + 512*MAX_DESCR_SECS_asm ! ParmBSS = max_secondary + 7

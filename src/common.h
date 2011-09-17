@@ -65,7 +65,7 @@ source directory.
 ;*/    char name[MAX_IMAGE_NAME+1];	/* image name, NUL terminated 
 						id_name:	.blkb	MAX_IMAGE_NAME_asm+1
 ;*/    unsigned short password_crc[MAX_PW_CRC*(sizeof(INT4)/sizeof(short))];  /* 4 password CRC-32 values
-						id_password_crc:.blkb	MAX_PW_CRC_asm*4
+						id_password_crc: .blkb	MAX_PW_CRC_asm*4
 ;*/    unsigned short rd_size[2]; /* RAM disk size in sectors, 0 if none
 						id_rd_size:	.blkb	4		;don't change the order !!!
 ;*/    SECTOR_ADDR initrd,start;  /* start of initrd & kernel

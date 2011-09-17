@@ -481,7 +481,7 @@ disk_error3: ! transfer through on CF=1
 
  pop dx ! restore device code
  mov dh,al ! set head#
- jmp disk_read2 ; ax=0x201 chs로 한섹터를 읽는다.
+ jmp disk_read2 ; ax=0x201 CHS로 한섹터를 읽는다.
 
 
 

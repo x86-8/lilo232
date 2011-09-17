@@ -1,41 +1,67 @@
-first는 제한된 MBR 영역에 들어가기 때문에 속도보다 명령어 크기를 줄이는데 신경을 많이 쓰고 있다.
-lilo는 섹터주소가 배열로 이루어진 map(index sector)를 읽어들인다.
-하지만 second stage map과 kernep map은 섹터주소 길이(4,5)와 구성에 차이가 있다.
+<LILO 23.2 분석>
 
-lilo에는 first second, third가 있다.
+lilo는 first와 second 두 단계가 있습니다.
+내부적으로는 text/menu/bitmap방식에 따라 컴파일 도중 second/third 로 구분되는데
+x86 8차에서 분석한건 second.S가 전처리되어 나오는 text 방식의 second.s입니다.
 
-디스크립터란.....
+first는 제한된 MBR 공간 때문에 속도보다 명령어 크기를 줄이는데 신경을 쓰고 있습니다.
+처음에 0x7c0에서 시작하며 dl에는 드라이브 번호가 넘어옵니다. 0=floppy.... 0x80=첫번째 하드 0x81=두번째 하드....
 
-키테이블에는 menutable 구조체가 있다.
+first 단계에서는 간단한 체크와 함께 "LILO" 문자열의 "LI"를 출력하고 second를 읽어와 second로 넘어갑니다.
+second를 로드할때 먼저 second의 섹터주소들이 모여있는 index sector(map)를 읽어온후 이 배열을 이용해 second를 읽어들입니다.
+second에서 사용하는 map과는 섹터주소 길이(4/5바이트)와 second를 가리키는 index sector는 마지막에 "LILO" signature를 포함하는 점만 다릅니다.
 
-매핑용 볼륨 테이블을 만든다. 결과는 devmap,vtab,rtab등에 들어간다.
-devmap는 logical:physical 형태로 이루어진다.
-vtab, rtab에는 연결된 하드의 raid_offset이 들어가고 rmask는 해당 하드가 레이드인지 비트
-    로 표시한다.
+second에서 쓰이는 map의 끝주소는 다음 map 주소입니다. map을 읽을때마다 화면에 '.'을 출력합니다.
 
-map의 구조는...
+lilo에서 디스크에서 섹터를 읽어들이는 방식은 CHS와 EDD가 있습니다.
+아무것도 지원하지 않거나 MBR을 읽을 때는 전통적인 CHS(cylinder,head,sector)방식으로 읽습니다.
+LINEAR,LBA 플래그가 모두 켜있고 EDD 테스트를 통과하면 패킷으로 파라미터를 전달하는 EDD 방식으로 읽습니다. 플래그가 하나만 켜있거나 EDD를 지원안하는등 문제가 있다면 LINEAR -> CHS 로 섹터주소를 변환해서 CHS방식으로 읽습니다.
+CHS방식은 읽을수 있는 범위에 제한이 있습니다.
 
-싱글키....
+second는 먼저 int 12h를 이용해 EBDA(Extended BIOS Data Area)를 구하고 second를 640KB 영역에서 EBDA를 제외한 가장 끝에 자신을 복제한후 복제한 코드로 점프합니다. 이에 따라 initseg이 가변적으로 바뀝니다. EBDA가 기대이상으로 크지 않다면 메모리 0x90000에 위치합니다.
 
-DFL+2 or external parameter command line 사용 -> cmdline 복사
-cmdline->lilo에서 파싱할수 있는것 하고 삭제
+이제 시리얼을 초기화하고 timer 핸들러를 등록하고 device를 매핑하기 위한 volume table을 만듭니다. volume table은 디스크에 논리:물리 번호로 변환해주는 테이블로 이후 디스크를 읽어들일때 변환 됩니다.
+볼륨 테이블은 디스크의 MBR에 있는 volumeID(serial number)와 lilo가 설치될때 저장한 volumeID들로 생성하고 이것은 하드 순서가 바뀌더라도 고유한 하드를 지정할수 있게 합니다.
+lilo가 raid-1을 지원해서 레이드에 필요한 일부 정보도 함께 만듭니다.
 
-nobd
+second가 가장 먼저 읽어들이는건 Keytable 섹터입니다.
+Keytable섹터에는 256바이트의 keytable 뒤에 각종 정보와 다른 섹터주소들이 저장되어 있는 MENUTABLE을 포함하고 있습니다. (common.h:MENUTABLE)
 
-kbd= 옵션은 16진수. 키코드값. 키보드 버퍼에 바로 쓴다.
+그리고 vmware와 키보드 연결을 체크하고 해당하는 플래그의 커널 이미지를 삭제합니다.
+이젠 Default command line 섹터를 읽어옵니다. lock옵션을 쓰면 사용한 옵션을 default command line에 저장해서 다음에도 동일한 옵션으로 부팅되게 합니다.
 
-cmdbeg=
+몇가지 더 초기화하고 greeting 메세지가 있다면 출력하고 옵션 입력을 받습니다. 이 메세지는 한번만 출력합니다.
+키보드/시리얼이 연결되어있지 않다면 default command line/external parameter의 옵션을 키입력 대신 받습니다. (처리후 키입력이 있다면 돌아가서 대화식 처리를 합니다.)
+옵션 입력을 받았다면 우선 LILO 옵션들(nobd,lock,kbd=등)은 파싱하면 사라지고 mem=이나 vga=는 세팅하고 남겨둡니다.
+lilo는 대부분 NUL(0)로 끝을 구분하고 옵션들은 공백으로 구분합니다.
+single-key 옵션을 사용하면 일치하는 글자를 누르면 해당하는 이미지로 부팅됩니다.
 
-lock=f4f2?
+이제 지정된 이미지를 디스크립터에서 찾습니다.
+디스크립터는 커널 이미지에 대한 정보(이미지 이름,암호,initrd/kernel 섹터주소등)들이 저장되어 있습니다.
 
-cmdbeg , cmdline, optsect -> parmline (kernel)
+패스워드를 확인하고 본격적으로 커널을 읽어들입니다.
+커널을 가리키는 map(id_start)에서 fallback, option 섹터를 읽어들이고 커널로 건내주기 위한 파라미터들을 복사합니다. "BOOT_IMAGE=<커널명> 옵션들"
+키입력 없이 왔다면 BOOT_IMAGE앞에 auto가 붙습니다.
 
-hma=
+작업을 마쳤으면 본래 커널인 bootsect(0x90000)와 setup(0x90200)코드를 읽어들이고 initrd가 있다면 읽어들입니다.
+이 때 mem=로 메모리 크기가 설정되어 있지 않으면 int 15h의 0xe820, 0xe801, 0x88으로 메모리 크기를 알아내 메모리 가장 높은곳에 올립니다.
+그리고 커널을 big kernel(bzImage)이면 1M 위쪽에 아니면 0x1000에 읽어들입니다. 1M이상에 올리기 위해서는 int 15h(0x87)을 사용하는데 GDT가 필요합니다.
 
-매직코드 보통 null end
+마지막으로 리눅스 BOOT PROTOCOL 버전을 확인한후 파라미터를 넘겨주고 메모리 0x600 영역에 BIOS data(video,disk정보등)를 수집합니다. 이 수집한 정보는 부팅후 lilo 명령으로 볼 수 있습니다. 부팅시 nobd 옵션을 사용하면 수집하지 않습니다.
 
-chs방식
+lilo에 필요한 정보는 /boot/map 파일에 저장되어 섹터주소로 기억합니다.
 
-load 구조
+MENU방식에 initrd가 없을때 기준으로 다음과 같습니다. 일부 섹터는 크기가 옵션에 따라 가변적이고 방식에 따라 추가되기도 합니다. (initrd, bitmap등)
 
-0x60 - 리로
+Default command line [1]
+Descriptor sector [3]
+Hole sector [1]
+Second code [18] // text방식이면 14, menu면 18
+Second index sector [1]
+Fallback sector [1]
+Option sector [1]
+Bootsect [1]
+Setup code
+Kernel
+
+
