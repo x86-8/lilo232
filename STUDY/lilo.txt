@@ -53,6 +53,7 @@ lilo에 필요한 정보는 /boot/map 파일에 저장되어 섹터주소로 기
 
 MENU방식에 initrd가 없을때 기준으로 다음과 같습니다. 일부 섹터는 크기가 옵션에 따라 가변적이고 방식에 따라 추가되기도 합니다. (initrd, bitmap등)
 
+
 Default command line [1]
 Descriptor sector [3]
 Hole sector [1]
@@ -60,9 +61,7 @@ Second code [18] // text방식이면 14, menu면 18
 Second index sector [1]
 Fallback sector [1]
 Option sector [1]
-
-Bootsect [1]
-Setup code
-Kernel
-
+Fabllback(1), Option(1), Bootsect(1), Setup(<64) map(섹터주소)
+Kernel map
 Keyboard translation table & MENUTABLE [1]
+
