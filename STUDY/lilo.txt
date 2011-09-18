@@ -51,17 +51,18 @@ single-key 옵션을 사용하면 일치하는 글자를 누르면 해당하는 
 
 lilo에 필요한 정보는 /boot/map 파일에 저장되어 섹터주소로 기억합니다.
 
-MENU방식에 initrd가 없을때 기준으로 다음과 같습니다. 일부 섹터는 크기가 옵션에 따라 가변적이고 방식에 따라 추가되기도 합니다. (initrd, bitmap등)
+
+MENU방식 map을 분석한 결과는 다음과 같습니다.
+일부 섹터는 크기가 옵션으로 조절 가능하고 bitmap을 사용하면 이미지가 추가됩니다. kernel쪽 map과 initrd map은 구분되며 map의 각 섹터는 마지막에 다음 섹터 주소를 가지고 있습니다.
 
 
 Default command line [1]
-Descriptor sector [3]
+Descriptor sector [3] // 크기 조절가능
 Hole sector [1]
 Second code [18] // text방식이면 14, menu면 18
 Second index sector [1]
 Fallback sector [1]
 Option sector [1]
-Fabllback(1), Option(1), Bootsect(1), Setup(<64) map(섹터주소)
-Kernel map
+Fabllback(1), Option(1), Bootsect(1), Setup(<64), kernel map
+Initrd map
 Keyboard translation table & MENUTABLE [1]
-
